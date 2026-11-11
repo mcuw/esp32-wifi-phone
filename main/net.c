@@ -8,9 +8,17 @@
 #include "esp_mac.h"
 #include "esp_timer.h"
 #include "app_config.h"
+
+/* The TWT API is declared in esp_wifi_he.h. On IDF 6.x esp_wifi.h no longer pulls it in. */
+#if __has_include("esp_wifi_he.h")
+#include "esp_wifi_he.h"
+#endif
 #include "dhcpserver/dhcpserver.h"   /* dhcps_offer_t; adjust path if your IDF exposes it elsewhere */
 
 static const char *TAG = "net";
+
+/* wifi_event_sta_itwt_setup_t.status is an esp_err_t: 1 = setup succeeded, anything else = failure. */
+#define ITWT_STATUS_OK 1
 
 static net_cb_t        s_cb;
 static net_state_t     s_state = NET_IDLE;
@@ -76,7 +84,7 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
     case WIFI_EVENT_ITWT_SETUP: {
         wifi_event_sta_itwt_setup_t *e = (wifi_event_sta_itwt_setup_t *)data;
         s_twt_pending = false;
-        if (e->status == ITWT_SETUP_SUCCESS) {
+        if (e->status == ITWT_STATUS_OK) {
             s_twt = true;
             ESP_LOGI(TAG, "iTWT agreed (flow %d)", e->config.flow_id);
         } else {
@@ -142,7 +150,7 @@ esp_err_t net_start_sta(const char *ssid, const char *pass)
     /* Wi-Fi 6 (HE) is mandatory for iTWT. ESP32-C6 is 2.4 GHz only -> HE20. */
     ESP_ERROR_CHECK(esp_wifi_set_protocol(WIFI_IF_STA,
         WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_11AX));
-    ESP_ERROR_CHECK(esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT20));
+    ESP_ERROR_CHECK(esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW20));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta));
     set_state(NET_CONNECTING);
     return esp_wifi_start();
