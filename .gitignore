@@ -1,0 +1,17 @@
+# ESP-IDF
+build/
+sdkconfig
+sdkconfig.old
+managed_components/
+# keep dependencies.lock committed once generated (reproducible component versions)
+
+# Web
+web/node_modules/
+web/dist/
+web/.astro/
+# keep web/package-lock.json committed once generated (CI uses `npm ci` when present)
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
