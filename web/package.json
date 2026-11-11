@@ -1,0 +1,20 @@
+{
+  "name": "c6phone-setup",
+  "type": "module",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "astro dev --host",
+    "build": "astro build",
+    "preview": "astro preview",
+    "test": "node --experimental-strip-types --test test/api.test.mjs"
+  },
+  "dependencies": {
+    "astro": "^5.0.0",
+    "@qwikdev/astro": "^0",
+    "@builder.io/qwik": "^1"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  }
+}

@@ -1,0 +1,65 @@
+---
+import Provision from "../components/qwik/Provision";
+---
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Telefon einrichten</title>
+  </head>
+  <body>
+    <main>
+      <h1>Telefon einrichten</h1>
+      <Provision />
+    </main>
+  </body>
+</html>
+
+<style is:global>
+  :root {
+    --bg: #edefe9; --surface: #fbfbf8; --ink: #1e2430; --dim: #5b6470;
+    --line: #cbd0c6; --accent: #3340a8; --accent-ink: #fff;
+    --ok: #2e7d5b; --bad: #b3362b;
+    /* No web fonts: the phone's access point has no internet. */
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #14171c; --surface: #1c2027; --ink: #e8eaee; --dim: #9aa3ae;
+            --line: #353b45; --accent: #8b95ff; --accent-ink: #11142e; --ok: #5bc79a; --bad: #ff8a7d; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); line-height: 1.5; }
+  main { max-width: 30rem; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+  h1 { font-size: 1.6rem; line-height: 1.2; margin: 0 0 1rem; letter-spacing: -0.01em; }
+  h2 { font-size: 1.2rem; margin: 0 0 .5rem; }
+  .stack { display: grid; gap: 1rem; }
+  .meta, .hint { color: var(--dim); font-size: .875rem; margin: .25rem 0; }
+  fieldset { border: 1px solid var(--line); background: var(--surface); border-radius: .5rem;
+             padding: 1rem; margin: 0; display: grid; gap: .5rem; }
+  legend { font-weight: 600; padding: 0 .35rem; }
+  label { font-size: .9rem; margin-top: .5rem; }
+  input { font: inherit; width: 100%; padding: .65rem .75rem; border: 1px solid var(--line);
+          border-radius: .4rem; background: var(--bg); color: var(--ink); }
+  .pw { display: grid; grid-template-columns: 1fr auto; gap: .5rem; }
+  button { font: inherit; border-radius: .4rem; border: 1px solid var(--line); padding: .65rem 1rem;
+           background: var(--surface); color: var(--ink); cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  button.ghost { background: transparent; }
+  button:disabled { opacity: .55; cursor: default; }
+  :is(button, input):focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .nets { list-style: none; margin: 0; padding: 0; display: grid; gap: .35rem; }
+  .net { width: 100%; display: grid; grid-template-columns: 1.5rem 1fr auto; gap: .6rem;
+         align-items: center; text-align: left; }
+  .net.sel { border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--accent); }
+  .ssid { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tag { color: var(--dim); font-size: .8rem; }
+  .sig { display: flex; align-items: flex-end; gap: 2px; height: 16px; }
+  .sig i { width: 4px; background: var(--line); border-radius: 1px; }
+  .sig i.on { background: var(--accent); }
+  .error { color: var(--bad); margin: 0; font-weight: 600; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: .5rem; padding: 1rem; }
+  .card.ok { border-color: var(--ok); }
+  .status { color: var(--dim); }
+</style>
