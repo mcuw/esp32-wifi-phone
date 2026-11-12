@@ -1,0 +1,5 @@
+dependencies:
+  idf: ">=6.1.0"
+  waveshare/esp32_c6_touch_amoled_2_06: "^2.0.0"   # display, touch, LVGL port
+  espressif/esp_codec_dev: "*"                      # ES8311 (speaker) + ES7210 (dual mic)
+  espressif/mdns: "*"                               # peer discovery
