@@ -199,7 +199,7 @@ static esp_err_t start_http(void)
     e = httpd_start(&srv, &cfg);
     if (e != ESP_OK) return e;
 
-    /* First match wins: API routes before the "/*" catch-all. */
+    /* First match wins: register the API routes before the wildcard catch-all. */
     httpd_uri_t routes[] = {
         { .uri = "/api/info", .method = HTTP_GET,  .handler = api_info },
         { .uri = "/api/scan", .method = HTTP_GET,  .handler = api_scan },
