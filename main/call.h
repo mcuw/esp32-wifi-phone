@@ -1,5 +1,6 @@
 #pragma once
 #include "peers.h"
+#include "esp_err.h"
 
 typedef enum { CALL_IDLE, CALL_OUTGOING, CALL_INCOMING, CALL_ACTIVE } call_state_t;
 
