@@ -20,6 +20,10 @@ CONFIG_LWIP_MAX_SOCKETS=16
 # --- SPIFFS: Astro/Qwik build output has long file names ---------------
 CONFIG_SPIFFS_OBJ_NAME_LEN=128
 
+# --- Core dump: bei Absturz ELF-Abbild in Partition "coredump" schreiben
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+
 # --- Memory: no PSRAM on this board, be careful -------------------------
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
 

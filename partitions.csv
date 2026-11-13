@@ -3,6 +3,7 @@
 # Flash-Encryption ist der Bootloader ~48 KiB groß und passt nicht mehr vor 0x8000.
 # Daher liegen nvs & Co. hinter den App-Slots (App-Partitionen müssen 64-KiB-ausgerichtet sein).
 # nvs_keys: Schlüssel für NVS-Verschlüsselung im Flash-Encryption-Schema (beim HMAC-Schema ungenutzt).
+# coredump: Absturzabbild (ELF), verschlüsselt, da es RAM-Inhalte (z. B. WLAN-Passwort) enthält.
 # storage: LittleFS für Dateien der Anwendung (braucht die Komponente joltwallet/littlefs).
 # Name,   Type, SubType,  Offset,   Size,     Flags
 ota_0,    app,  ota_0,    0x10000,  0x300000,
@@ -11,5 +12,6 @@ nvs,      data, nvs,      0x610000, 0x6000,
 otadata,  data, ota,      0x616000, 0x2000,
 nvs_keys, data, nvs_keys, 0x618000, 0x1000,   encrypted
 phy_init, data, phy,      0x619000, 0x1000,
-www,      data, spiffs,   0x61a000, 0x1e6000,
+coredump, data, coredump, 0x61a000, 0x10000,  encrypted
+www,      data, spiffs,   0x62a000, 0x1d6000,
 storage,  data, littlefs, 0x800000, 0x800000,

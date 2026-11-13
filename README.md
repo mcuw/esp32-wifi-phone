@@ -61,7 +61,7 @@ sh test/host/run.sh                    # C-Tests (ADPCM, JSON, DNS) mit ASan/UBS
 GitHub Actions (`.github/workflows/ci.yml`), bei Push auf `main`, Pull Requests und Tags `v*`:
 
 1. **Host tests**: obige Tests.
-2. **Web UI**: `npm run build`, prüft, dass `dist/` in die ~1,9-MiB-Partition `www` passt.
+2. **Web UI**: `npm run build`, prüft, dass `dist/` in die ~1,8-MiB-Partition `www` passt.
 3. **Firmware**: baut mit `espressif/esp-idf-ci-action` (ESP-IDF `v6.1`, Ziel `esp32c6`) und lädt die
    flashbaren Dateien als Artefakt hoch. Flashen: Artefakt entpacken, dann
    `esptool --chip esp32c6 write_flash @flash_args`.
