@@ -50,13 +50,13 @@ jobs:
       - name: Build
         working-directory: web
         run: npm run build
-      - name: Check output fits the 1 MiB "www" partition
+      - name: Check output fits the ~1.9 MiB "www" partition
         working-directory: web
         run: |
           test -f dist/index.html
           kib=$(du -sk dist | cut -f1)
           echo "dist size: ${kib} KiB"
-          [ "$kib" -lt 900 ]
+          [ "$kib" -lt 1800 ]
       - uses: actions/upload-artifact@v7
         with:
           name: web-dist
@@ -85,7 +85,7 @@ jobs:
         run: |
           mkdir -p out
           cd build
-          cp --parents bootloader/bootloader.bin partition_table/partition-table.bin \
+          cp --parents bootloader/bootloader.bin partition_table/partition-table.bin ota_data_initial.bin \
              c6_phone.bin www.bin flash_args flasher_args.json ../out/
           cp c6_phone.elf ../out/
       - uses: actions/upload-artifact@v7
