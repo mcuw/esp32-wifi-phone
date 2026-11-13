@@ -1,4 +1,4 @@
-import { component$, useStore, useVisibleTask$, $ } from "@builder.io/qwik";
+import { component$, useStore, useVisibleTask$, $ } from "@qwik.dev/core";
 import { api } from "../../lib/api";
 
 type Net = { s: string; r: number; a: number };
