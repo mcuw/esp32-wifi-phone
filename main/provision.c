@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <inttypes.h>
 #include "freertos/FreeRTOS.h"
 #include "esp_log.h"
 #include "esp_spiffs.h"
@@ -10,6 +11,9 @@
 #include "esp_timer.h"
 #include "esp_mac.h"
 #include "esp_netif.h"
+#include "esp_partition.h"
+#include "esp_core_dump.h"
+#include "esp_app_desc.h"
 #include "app_config.h"
 #include "net.h"
 #include "storage.h"
@@ -114,6 +118,85 @@ static esp_err_t api_wifi(httpd_req_t *req)
     return r;
 }
 
+/* ------------------------------------------------------------ core dump --- */
+/* Only served on the provisioning soft-AP (WPA2, random password shown on the
+ * display), so fetching a dump needs the device in hand. The CPU decrypts the
+ * flash transparently, so this also works with flash encryption enabled, where
+ * `idf.py coredump-info` over USB only sees ciphertext. */
+
+static esp_err_t api_coredump(httpd_req_t *req)
+{
+    size_t addr, size;
+    if (esp_core_dump_image_check() != ESP_OK || esp_core_dump_image_get(&addr, &size) != ESP_OK)
+        return send_json(req, "{\"present\":false}");
+
+    esp_core_dump_summary_t *sm = calloc(1, sizeof *sm);
+    char *buf = malloc(768);
+    if (!sm || !buf) { free(sm); free(buf); return fail(req, "500 Internal Server Error", "memory"); }
+
+    char reason[160] = "", reason_e[2 * sizeof reason + 8] = "", task_e[2 * sizeof sm->exc_task + 8] = "";
+    esp_core_dump_get_panic_reason(reason, sizeof reason);
+    json_escape(reason, reason_e, sizeof reason_e);
+
+    int o = snprintf(buf, 768, "{\"present\":true,\"size\":%u,\"reason\":\"%s\"", (unsigned)size, reason_e);
+    if (esp_core_dump_get_summary(sm) == ESP_OK) {
+        sm->exc_task[sizeof sm->exc_task - 1] = 0;
+        sm->app_elf_sha256[sizeof sm->app_elf_sha256 - 1] = 0;
+        json_escape(sm->exc_task, task_e, sizeof task_e);
+        const char *cur = esp_app_get_elf_sha256_str();
+        o += snprintf(buf + o, 768 - o,
+                      ",\"task\":\"%s\",\"pc\":\"0x%08" PRIx32 "\",\"ra\":\"0x%08" PRIx32 "\","
+                      "\"sp\":\"0x%08" PRIx32 "\",\"mcause\":\"0x%08" PRIx32 "\",\"mtval\":\"0x%08" PRIx32 "\","
+                      "\"elf_sha\":\"%s\",\"same_fw\":%s",
+                      task_e, sm->exc_pc, sm->ex_info.ra, sm->ex_info.sp, sm->ex_info.mcause, sm->ex_info.mtval,
+                      (const char *)sm->app_elf_sha256,
+                      strncmp(cur, (const char *)sm->app_elf_sha256, strlen((const char *)sm->app_elf_sha256)) ? "false" : "true");
+    }
+    snprintf(buf + o, 768 - o, "}");
+    esp_err_t r = send_json(req, buf);
+    free(sm);
+    free(buf);
+    return r;
+}
+
+/* Raw flash image (header + ELF + checksum):
+ *   esp-coredump info_corefile -t raw -c coredump.bin build/c6_phone.elf */
+static esp_err_t api_coredump_bin(httpd_req_t *req)
+{
+    size_t addr, size;
+    if (esp_core_dump_image_check() != ESP_OK || esp_core_dump_image_get(&addr, &size) != ESP_OK)
+        return fail(req, "404 Not Found", "no core dump");
+    const esp_partition_t *p = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP, NULL);
+    if (!p || addr < p->address || addr + size > p->address + p->size)
+        return fail(req, "500 Internal Server Error", "partition");
+
+    char *buf = malloc(1024);
+    if (!buf) return fail(req, "500 Internal Server Error", "memory");
+    /* No CORS header here: the dump contains RAM, i.e. possibly the Wi-Fi password. */
+    httpd_resp_set_type(req, "application/octet-stream");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=\"coredump.bin\"");
+    esp_err_t r = ESP_OK;
+    for (size_t off = 0; off < size && r == ESP_OK; ) {
+        size_t n = size - off < 1024 ? size - off : 1024;
+        r = esp_partition_read(p, addr - p->address + off, buf, n);   /* decrypts if encrypted */
+        if (r == ESP_OK) r = httpd_resp_send_chunk(req, buf, n);
+        off += n;
+    }
+    memset(buf, 0, 1024);
+    free(buf);
+    if (r != ESP_OK) { ESP_LOGE(TAG, "coredump download: %s", esp_err_to_name(r)); return ESP_FAIL; }
+    return httpd_resp_send_chunk(req, NULL, 0);
+}
+
+static esp_err_t api_coredump_erase(httpd_req_t *req)
+{
+    esp_err_t e = esp_core_dump_image_erase();
+    if (e != ESP_OK) return fail(req, "500 Internal Server Error", esp_err_to_name(e));
+    ESP_LOGI(TAG, "core dump erased");
+    return send_json(req, "{\"ok\":true}");
+}
+
 /* ------------------------------------------------------- static HTTP ---- */
 
 static const char *mime(const char *p)
@@ -204,6 +287,9 @@ static esp_err_t start_http(void)
         { .uri = "/api/info", .method = HTTP_GET,  .handler = api_info },
         { .uri = "/api/scan", .method = HTTP_GET,  .handler = api_scan },
         { .uri = "/api/wifi", .method = HTTP_POST, .handler = api_wifi },
+        { .uri = "/api/coredump",     .method = HTTP_GET,    .handler = api_coredump },
+        { .uri = "/api/coredump.bin", .method = HTTP_GET,    .handler = api_coredump_bin },
+        { .uri = "/api/coredump",     .method = HTTP_DELETE, .handler = api_coredump_erase },
         { .uri = "/*",        .method = HTTP_GET,  .handler = static_get },
     };
     for (size_t i = 0; i < sizeof routes / sizeof routes[0]; i++) {

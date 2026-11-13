@@ -87,6 +87,23 @@ curl http://192.168.4.1/api/scan
 curl -X POST -d '{"ssid":"MeinNetz","pass":"geheim1234","name":"Anna"}' http://192.168.4.1/api/wifi
 ```
 
+## Absturzabbild (Core Dump)
+
+Bei einem Absturz schreibt die Firmware ein Abbild in die Partition `coredump`. Ohne
+Flash-Encryption liest man es per USB mit `idf.py coredump-info`. Mit Flash-Encryption sieht USB nur
+Chiffretext; dann holt man es über den Einrichtungsmodus (softAP, Passwort steht auf dem Display):
+
+```bash
+curl http://192.168.4.1/api/coredump                    # Zusammenfassung (Task, PC, Ursache, ELF-SHA)
+curl -o coredump.bin http://192.168.4.1/api/coredump.bin
+esp-coredump info_corefile -t raw -c coredump.bin build/c6_phone.elf
+curl -X DELETE http://192.168.4.1/api/coredump          # danach löschen
+```
+
+`elf_sha` bzw. `same_fw` zeigen, ob das Abbild zur laufenden Firmware passt. Zum Auswerten braucht es
+die `c6_phone.elf` genau des abgestürzten Builds (liegt im CI-Artefakt). **Das Abbild enthält
+RAM-Inhalte, also möglicherweise das WLAN-Passwort: vertraulich behandeln und nach dem Auswerten löschen.**
+
 ## Verifikationsstand (bitte lesen)
 
 **Geprüft:**
