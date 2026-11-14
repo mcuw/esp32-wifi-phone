@@ -1,5 +1,5 @@
 import { defineConfig } from "astro/config";
-import qwikdev from "@qwikdev/astro";
+import qwikdev from "@qwik.dev/astro";
 
 // Static output -> web/dist is flashed into the ESP32's "www" SPIFFS partition.
 export default defineConfig({

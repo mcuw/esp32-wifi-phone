@@ -61,7 +61,7 @@ sh test/host/run.sh                    # C-Tests (ADPCM, JSON, DNS) mit ASan/UBS
 GitHub Actions (`.github/workflows/ci.yml`), bei Push auf `main`, Pull Requests und Tags `v*`:
 
 1. **Host tests**: obige Tests.
-2. **Web UI**: `npm run build`, prüft, dass `dist/` in die 1-MiB-Partition `www` passt.
+2. **Web UI**: `npm run build`, prüft, dass `dist/` in die ~1,8-MiB-Partition `www` passt.
 3. **Firmware**: baut mit `espressif/esp-idf-ci-action` (ESP-IDF `v6.1`, Ziel `esp32c6`) und lädt die
    flashbaren Dateien als Artefakt hoch. Flashen: Artefakt entpacken, dann
    `esptool --chip esp32c6 write_flash @flash_args`.
@@ -86,6 +86,23 @@ curl http://192.168.4.1/api/info
 curl http://192.168.4.1/api/scan
 curl -X POST -d '{"ssid":"MeinNetz","pass":"geheim1234","name":"Anna"}' http://192.168.4.1/api/wifi
 ```
+
+## Absturzabbild (Core Dump)
+
+Bei einem Absturz schreibt die Firmware ein Abbild in die Partition `coredump`. Ohne
+Flash-Encryption liest man es per USB mit `idf.py coredump-info`. Mit Flash-Encryption sieht USB nur
+Chiffretext; dann holt man es über den Einrichtungsmodus (softAP, Passwort steht auf dem Display):
+
+```bash
+curl http://192.168.4.1/api/coredump                    # Zusammenfassung (Task, PC, Ursache, ELF-SHA)
+curl -o coredump.bin http://192.168.4.1/api/coredump.bin
+esp-coredump info_corefile -t raw -c coredump.bin build/c6_phone.elf
+curl -X DELETE http://192.168.4.1/api/coredump          # danach löschen
+```
+
+`elf_sha` bzw. `same_fw` zeigen, ob das Abbild zur laufenden Firmware passt. Zum Auswerten braucht es
+die `c6_phone.elf` genau des abgestürzten Builds (liegt im CI-Artefakt). **Das Abbild enthält
+RAM-Inhalte, also möglicherweise das WLAN-Passwort: vertraulich behandeln und nach dem Auswerten löschen.**
 
 ## Verifikationsstand (bitte lesen)
 
@@ -114,7 +131,7 @@ curl -X POST -d '{"ssid":"MeinNetz","pass":"geheim1234","name":"Anna"}' http://1
 - **mDNS-Multicast ist unter iTWT unzuverlässig.** Die Kontaktsuche läuft deshalb nur bei eingeschaltetem Display.
 - **Kein Echo-Canceller.** Die Platine hat zwar einen ES7210 mit Referenzpfad, aber ich habe keine Software-AEC für den C6 verifiziert. `call.c` dämpft das Mikro per einfachem Ducking, wenn die Gegenseite laut ist. Für Freisprechen reicht das nur bedingt; Hörer-Betrieb mit niedriger Lautstärke ist robuster. Die zwei Mikrofone werden nur gemittelt (kein Beamforming).
 - **Keine Verschlüsselung der Gespräche.** Signalisierung und Audio gehen unverschlüsselt per UDP durchs LAN. Für mehr als ein Heimnetz wären SRTP/DTLS nötig. Die Provisioning-Daten laufen über das WPA2-geschützte softAP-Netz (Zufallspasswort pro Boot), nicht über TLS.
-- **Zugangsdaten liegen im NVS im Klartext.** Für Produktion: Flash-Encryption + NVS-Verschlüsselung aktivieren.
+- **Zugangsdaten liegen im NVS im Klartext.** Geplant: NVS-Verschlüsselung im HMAC-Schema (`CONFIG_NVS_ENCRYPTION`, `CONFIG_NVS_SEC_KEY_PROTECT_USING_HMAC`, `CONFIG_NVS_SEC_HMAC_EFUSE_KEY_ID`). Fehlt der eFuse-Schlüssel, erzeugt und brennt die Firmware ihn beim ersten Start (irreversibel). Eine `nvs_keys`-Partition braucht dieses Schema nicht.
 - **Umlaute** im Gerätenamen erscheinen auf dem Display nicht (Montserrat ohne Latin-1). Eigenen LVGL-Font mit Umlauten generieren, wenn nötig.
 - **Aufwecken per Touch** löst im ersten Moment auch den Button unter dem Finger aus. Ein „erste Berührung nur wecken“-Filter fehlt noch.
 - **Speicher:** 512 KB SRAM ohne PSRAM, LVGL-Puffer + Wi-Fi + mDNS + Audio sind knapp. Bei Heap-Problemen zuerst Puffergrößen im BSP und Task-Stacks prüfen (`heap_caps_print_heap_info`).

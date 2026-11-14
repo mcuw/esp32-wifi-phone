@@ -1,5 +1,16 @@
-# Name,   Type, SubType, Offset,  Size
-nvs,      data, nvs,     0x9000,  0x6000
-phy_init, data, phy,     0xf000,  0x1000
-factory,  app,  factory, 0x10000, 0x300000
-www,      data, spiffs,  ,        0x100000
+# ESP32-C6, 16 MB Flash. Zwei OTA-Slots für spätere Firmware-Updates.
+# Partitionstabelle liegt bei 0xF000 (CONFIG_PARTITION_TABLE_OFFSET): Mit Secure Boot V2 +
+# Flash-Encryption ist der Bootloader ~48 KiB groß und passt nicht mehr vor 0x8000.
+# Daher liegen nvs & Co. hinter den App-Slots (App-Partitionen müssen 64-KiB-ausgerichtet sein).
+# NVS-Verschlüsselung per HMAC-Schema (Schlüssel aus eFuse) -> keine nvs_keys-Partition nötig.
+# coredump: Absturzabbild (ELF), verschlüsselt, da es RAM-Inhalte (z. B. WLAN-Passwort) enthält.
+# storage: LittleFS für Dateien der Anwendung (braucht die Komponente joltwallet/littlefs).
+# Name,   Type, SubType,  Offset,   Size,     Flags
+ota_0,    app,  ota_0,    0x10000,  0x300000,
+ota_1,    app,  ota_1,    0x310000, 0x300000,
+nvs,      data, nvs,      0x610000, 0x6000,
+otadata,  data, ota,      0x616000, 0x2000,
+phy_init, data, phy,      0x618000, 0x1000,
+coredump, data, coredump, 0x619000, 0x10000,  encrypted
+www,      data, spiffs,   0x629000, 0x1d7000,
+storage,  data, littlefs, 0x800000, 0x800000,
