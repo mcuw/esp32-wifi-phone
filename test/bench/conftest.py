@@ -4,6 +4,7 @@ Not run in CI (no boards there). See README.md, section "Bench-Test".
 """
 import json
 import os
+import pathlib
 import time
 import urllib.parse
 import urllib.request
@@ -27,6 +28,8 @@ def pytest_addoption(parser):
     g.addoption("--callee-bin", default="build/c6_phone.bin",
                 help="Normal app image for the callee; also flashed back to the caller "
                      "afterwards ('' = leave both boards as they are)")
+    g.addoption("--log-dir", default=str(pathlib.Path(__file__).parent / "logs"),
+                help="Where the serial logs of both boards are saved (every run, pass or fail)")
 
 
 class Bench:

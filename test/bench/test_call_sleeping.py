@@ -13,6 +13,8 @@ Checked per call (round):
   * after the caller hung up (ring time > IDLE_MS), the callee went back to
     iTWT within SLEEP_AGAIN_MAX_MS
 """
+import datetime
+import pathlib
 import re
 import time
 
@@ -72,25 +74,46 @@ def boards(bench, pytestconfig):
         bench.flash_app(caller, o("--callee-bin"))     # leave no autodial firmware behind
 
 
-def collect(bench, caller, callee):
-    """Reboot callee, then caller; record both logs until autodial is done."""
+def save_logs(log_dir, raw, roles):
+    """Write each board's serial log with the bench's wall-clock time in front,
+    so the two files can be read side by side."""
+    log_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    paths = []
+    for slot, role in roles.items():
+        path = log_dir / f"{stamp}-{role}-{slot}.log"
+        with open(path, "w") as f:
+            for e in raw[slot]:
+                t = datetime.datetime.fromtimestamp(e["ts"]).strftime("%H:%M:%S.%f")[:-3]
+                f.write(f"{t}  {e['text']}\n")
+        paths.append(path)
+    print("serial logs:", *paths, sep="\n  ")   # pytest shows this for a failed test
+    return paths
+
+
+def collect(bench, caller, callee, log_dir):
+    """Reboot callee, then caller; record both logs until autodial is done.
+    The logs are saved in any case - also when the run is aborted."""
     since = {s: bench.last_ts(s) for s in (caller, callee)}
     raw = {caller: [], callee: []}
-    bench.reset(callee)             # awake for IDLE_MS, so the caller finds it via mDNS
-    bench.reset(caller)
     done_at = None
-    deadline = time.monotonic() + RUN_TIMEOUT_S
-    while time.monotonic() < deadline:
-        time.sleep(5)
-        for s in (caller, callee):
-            new = bench.lines_since(s, since[s])
-            if new:
-                since[s] = new[-1]["ts"]
-                raw[s] += new
-        if done_at is None and any("autodial: done" in e["text"] for e in raw[caller]):
-            done_at = time.monotonic()
-        if done_at and time.monotonic() - done_at > SLEEP_AGAIN_MAX_MS / 1000 + 5:
-            break
+    try:
+        bench.reset(callee)             # awake for IDLE_MS, so the caller finds it via mDNS
+        bench.reset(caller)
+        deadline = time.monotonic() + RUN_TIMEOUT_S
+        while time.monotonic() < deadline:
+            time.sleep(5)
+            for s in (caller, callee):
+                new = bench.lines_since(s, since[s])
+                if new:
+                    since[s] = new[-1]["ts"]
+                    raw[s] += new
+            if done_at is None and any("autodial: done" in e["text"] for e in raw[caller]):
+                done_at = time.monotonic()
+            if done_at and time.monotonic() - done_at > SLEEP_AGAIN_MAX_MS / 1000 + 5:
+                break
+    finally:
+        save_logs(log_dir, raw, {caller: "caller", callee: "callee"})
     # Only the boot we caused counts: cut at the last bootloader banner.
     for s in raw:
         starts = [i for i, e in enumerate(raw[s]) if "app_init: App version" in e["text"]]
@@ -112,9 +135,10 @@ def rounds_of(caller_log):
     return rounds
 
 
-def test_call_reaches_sleeping_phone(bench, boards):
+def test_call_reaches_sleeping_phone(bench, boards, pytestconfig):
     caller, callee, callee_mac = boards
-    caller_log, callee_log, finished = collect(bench, caller, callee)
+    log_dir = pathlib.Path(pytestconfig.getoption("--log-dir"))
+    caller_log, callee_log, finished = collect(bench, caller, callee, log_dir)
 
     assert any(tag == "autodial" and "peer" in msg for _, tag, msg in caller_log), \
         "caller never found the callee via mDNS (is the caller running the autodial build?)"

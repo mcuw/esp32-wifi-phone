@@ -16,3 +16,5 @@ web/.astro/
 .vscode/
 .idea/
 .DS_Store
+test/bench/logs/
+__pycache__/

@@ -117,6 +117,12 @@ neu, damit der ARP-Cache des Anrufers leer ist. Dann wertet er zwei Anrufe aus:
 
 Zum Schluss flasht er dem Anrufer wieder die normale Firmware. Dauer: etwa 5 min.
 
+Bei jedem Lauf, ob bestanden oder nicht, speichert der Test die seriellen Logs beider Boards unter
+`test/bench/logs/<zeit>-caller-<slot>.log` und `…-callee-<slot>.log` (anderer Ort: `--log-dir`). Vor
+jeder Zeile steht die Uhrzeit des Testbench. So lassen sich beide Dateien nebeneinander lesen, etwa
+gesendetes INVITE beim Anrufer gegen empfangenes beim Angerufenen. Bei einem Fehlschlag nennt pytest
+die Pfade.
+
 Zur Fehlersuche lohnt der Blick in diese Logzeilen:
 
 - `call: sig tx/rx …` mit `arp yes/NO`: Ist die MAC der Gegenstelle bekannt?
