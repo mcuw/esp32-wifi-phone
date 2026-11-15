@@ -99,14 +99,18 @@ static void cap_task(void *arg)
     media_t pkt = { .magic = 0xA1 };
     adpcm_state_t st = { 0, 0 };
     uint16_t seq = 0;
-    int gain_q8 = 256;
+    int gain_q8 = 256, hang = 0;
     while (s_media_run) {
         if (board_mic_read(pcm, AUDIO_FRAME) != AUDIO_FRAME) { vTaskDelay(pdMS_TO_TICKS(5)); continue; }
 
-        /* Crude speakerphone echo ducking (no AEC on this MCU, see README):
-         * while the far end is loud, attenuate the mic path. */
-        int target = s_far_level > 1500 ? 64 : 256;
-        gain_q8 += (target - gain_q8) / 4;
+        /* Half-duplex echo suppression (no AEC on this MCU, see README):
+         * while the far end is audible, duck the mic hard and at once, and
+         * hold it for a moment so the acoustic tail does not leak back. */
+        if (s_far_level > ECHO_FAR_ACTIVE) hang = ECHO_HANG_FRAMES;
+        else if (hang > 0) hang--;
+        int target = hang > 0 ? ECHO_DUCK_Q8 : 256;
+        if (target < gain_q8) gain_q8 = target;          /* attack: immediate */
+        else gain_q8 += (target - gain_q8 + 3) / 4;      /* release: ~4 frames */
         for (int i = 0; i < AUDIO_FRAME; i++) pcm[i] = (int16_t)((pcm[i] * gain_q8) >> 8);
 
         pkt.seq = seq++;

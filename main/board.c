@@ -108,7 +108,7 @@ esp_err_t board_audio_start(void)
     ESP_ERROR_CHECK(esp_codec_dev_open(s_spk, &fs) == ESP_CODEC_DEV_OK ? ESP_OK : ESP_FAIL);
     ESP_ERROR_CHECK(esp_codec_dev_open(s_mic, &fs) == ESP_CODEC_DEV_OK ? ESP_OK : ESP_FAIL);
     esp_codec_dev_set_out_vol(s_spk, s_volume);
-    esp_codec_dev_set_in_gain(s_mic, 30.0f);
+    esp_codec_dev_set_in_gain(s_mic, MIC_GAIN_DB);
 
     s_audio_on = true;
     ESP_LOGI(TAG, "audio started");
