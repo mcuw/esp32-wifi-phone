@@ -16,9 +16,10 @@
 
 /* Speaker -> own mic coupling, measured 2026-11-15 on the 2.06" board
  * (1 kHz, vol 70, mic gain 30 dB): mic amplitude = 1.7 x played amplitude.
- * Two phones in a call form a loop of 1.7^2 ~ 3 -> howling. 18 dB gain puts
- * one device at ~0.43 and the loop at ~0.18 even without echo ducking. */
-#define MIC_GAIN_DB         18.0f
+ * Two phones in a call form a loop of 1.7^2 ~ 3 -> howling. 21 dB gain puts
+ * one device at ~0.6 and the loop at ~0.37 even without echo ducking.
+ * Tried on two boards: 18 dB too quiet, 24 dB too strong. */
+#define MIC_GAIN_DB         21.0f
 /* Half-duplex echo suppression in call.c: while the far end plays above
  * ECHO_FAR_ACTIVE (mean |x|), the mic is attenuated by ECHO_DUCK_Q8/256
  * (16/256 = -24 dB), held for ECHO_HANG_FRAMES after the far end stops. */
