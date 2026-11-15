@@ -239,6 +239,12 @@ void ui_set_call(call_state_t st, const char *peer, const char *note)
 
     if (st == CALL_IDLE) {
         lv_screen_load(scr_contacts);        /* 'note' ("Aufgelegt", ...) is shown on the next list refresh */
+        /* The call woke the phone (screen, Wi-Fi) without going through
+         * idle_tick. Count the idle time from now and report "not idle", so
+         * that idle_tick sees a change again and puts the phone back to sleep -
+         * also after an unanswered call that rang longer than IDLE_MS. */
+        lv_display_trigger_activity(NULL);
+        if (s_idle) { s_idle = false; if (H.idle) H.idle(false); }
         if (note) lv_label_set_text(c_net, note);
     } else {
         lv_display_trigger_activity(NULL);   /* wake the screen */

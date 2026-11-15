@@ -1,0 +1,46 @@
+menu "Telefon: Testfunktionen"
+
+    config PHONE_TEST_AUTODIAL
+        bool "Automatisch wählen (nur für Bench-Tests)"
+        default n
+        help
+            Das Telefon ruft den ersten gefundenen Kontakt (oder den unter
+            PHONE_TEST_AUTODIAL_PEER genannten) wiederholt an und legt nach
+            einer festen Klingeldauer wieder auf. Damit lassen sich Anrufe auf
+            ein Telefon im Sparmodus (iTWT) ohne Touch-Bedienung testen, siehe
+            test/bench/ und Issue #5.
+
+            Nur über sdkconfig.autodial in einem eigenen Build-Verzeichnis
+            einschalten, nie in der Release-Firmware.
+
+    if PHONE_TEST_AUTODIAL
+
+        config PHONE_TEST_AUTODIAL_PEER
+            string "Kontaktname (leer = erster gefundener)"
+            default ""
+
+        config PHONE_TEST_AUTODIAL_DELAY_S
+            int "Wartezeit nach dem Finden des Kontakts (s)"
+            default 45
+            help
+                Muss deutlich über IDLE_MS (20 s) liegen, damit der
+                Angerufene beim ersten Anruf schon im iTWT schläft.
+
+        config PHONE_TEST_AUTODIAL_RING_S
+            int "Klingeldauer bis zum Auflegen (s)"
+            default 30
+            help
+                Über 20 s prüft zusätzlich, dass der Angerufene nach einem
+                unbeantworteten langen Klingeln wieder in den Sparmodus geht.
+
+        config PHONE_TEST_AUTODIAL_PAUSE_S
+            int "Pause zwischen zwei Anrufen (s)"
+            default 50
+
+        config PHONE_TEST_AUTODIAL_ROUNDS
+            int "Anzahl Anrufe (0 = endlos)"
+            default 2
+
+    endif
+
+endmenu

@@ -76,6 +76,38 @@ static bool peer_in_arp(void)
     return q.found;
 }
 
+/* A callee sleeping in iTWT does not receive broadcasts, so it never answers
+ * our ARP request. lwIP drops ARP entries after ARP_MAXAGE (5 min), so after a
+ * few quiet minutes the INVITE would wait for the callee's next gratuitous ARP
+ * (every CONFIG_LWIP_GARP_TMR_INTERVAL = 60 s) - far longer than the INVITE
+ * retries last. With the MAC from mDNS we add a static entry for the call. */
+struct arp_static { struct tcpip_api_call_data call; ip4_addr_t ip; struct eth_addr mac; bool add; err_t r; };
+static err_t arp_static_fn(struct tcpip_api_call_data *c)
+{
+    struct arp_static *a = (struct arp_static *)c;
+    a->r = a->add ? etharp_add_static_entry(&a->ip, &a->mac) : etharp_remove_static_entry(&a->ip);
+    return ERR_OK;
+}
+static ip4_addr_t s_static_arp;                   /* 0 = none installed */
+static void arp_static_set(const peer_t *p)
+{
+    if (!p->has_mac) return;
+    struct arp_static a = { .add = true };
+    a.ip.addr = p->ip.addr;
+    memcpy(a.mac.addr, p->mac, 6);
+    tcpip_api_call(arp_static_fn, &a.call);
+    if (a.r == ERR_OK) s_static_arp = a.ip;
+    ESP_LOGI(TAG, "static ARP %s -> %02x:%02x:%02x:%02x:%02x:%02x: %d", ip4addr_ntoa(&a.ip),
+             p->mac[0], p->mac[1], p->mac[2], p->mac[3], p->mac[4], p->mac[5], a.r);
+}
+static void arp_static_clear(void)
+{
+    if (!s_static_arp.addr) return;
+    struct arp_static a = { .add = false, .ip = s_static_arp };
+    tcpip_api_call(arp_static_fn, &a.call);
+    s_static_arp.addr = 0;
+}
+
 static const char *sig_name(uint8_t t)
 {
     static const char *n[] = { "?", "INVITE", "RINGING", "ACCEPT", "REJECT", "BYE" };
@@ -255,6 +287,7 @@ static void to_idle(const char *note, bool send_bye)
     ring_stop();
     media_stop();
     board_audio_stop();
+    arp_static_clear();
     s_state = CALL_IDLE;
     notify(CALL_IDLE, note);
 }
@@ -350,6 +383,7 @@ esp_err_t call_dial(const peer_t *p)
         s_peer.sin_addr.s_addr = p->ip.addr;
         strlcpy(s_peer_name, p->name, sizeof s_peer_name);
         s_call_id = (uint16_t)esp_random();
+        arp_static_set(p);
         s_state = CALL_OUTGOING;
         s_invite_tries = 0;
         sig_send(SIG_INVITE);

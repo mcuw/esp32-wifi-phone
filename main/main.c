@@ -65,7 +65,50 @@ static void on_call(call_state_t st, const char *peer, const char *note)
     if (st == CALL_IDLE) peers_refresh();
 }
 
-static void on_peers(const peer_t *l, int n) { ui_set_peers(l, n); }
+#if CONFIG_PHONE_TEST_AUTODIAL
+/* Bench test hook (see Kconfig.projbuild, test/bench/): dial a peer from the
+ * mDNS list - the same path as a tap on the contact - and hang up after a
+ * fixed ring time. The "autodial:" lines are parsed by the bench test. */
+static peer_t        s_ad_peer;
+static volatile bool s_ad_have;
+
+static void autodial_task(void *arg)
+{
+    vTaskDelay(pdMS_TO_TICKS(CONFIG_PHONE_TEST_AUTODIAL_DELAY_S * 1000));
+    for (int round = 1; CONFIG_PHONE_TEST_AUTODIAL_ROUNDS == 0 || round <= CONFIG_PHONE_TEST_AUTODIAL_ROUNDS; round++) {
+        if (round > 1) vTaskDelay(pdMS_TO_TICKS(CONFIG_PHONE_TEST_AUTODIAL_PAUSE_S * 1000));
+        ESP_LOGW("autodial", "round %d: dial '%s' " IPSTR " mac %s", round, s_ad_peer.name,
+                 IP2STR(&s_ad_peer.ip), s_ad_peer.has_mac ? "yes" : "no");
+        h_dial(&s_ad_peer);
+        vTaskDelay(pdMS_TO_TICKS(CONFIG_PHONE_TEST_AUTODIAL_RING_S * 1000));
+        ESP_LOGW("autodial", "round %d: hangup", round);
+        h_hangup();
+    }
+    ESP_LOGW("autodial", "done");
+    vTaskDelete(NULL);
+}
+
+static void autodial_pick(const peer_t *l, int n)
+{
+    if (s_ad_have) return;
+    for (int i = 0; i < n; i++) {
+        if (CONFIG_PHONE_TEST_AUTODIAL_PEER[0] && strcmp(l[i].name, CONFIG_PHONE_TEST_AUTODIAL_PEER)) continue;
+        s_ad_peer = l[i];
+        s_ad_have = true;
+        ESP_LOGW("autodial", "peer '%s' found, first call in %d s", l[i].name, CONFIG_PHONE_TEST_AUTODIAL_DELAY_S);
+        xTaskCreate(autodial_task, "autodial", 3072, NULL, 3, NULL);
+        return;
+    }
+}
+#endif
+
+static void on_peers(const peer_t *l, int n)
+{
+#if CONFIG_PHONE_TEST_AUTODIAL
+    autodial_pick(l, n);
+#endif
+    ui_set_peers(l, n);
+}
 
 static void on_net(net_state_t st, bool itwt)
 {

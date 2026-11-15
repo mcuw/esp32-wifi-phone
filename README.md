@@ -89,6 +89,51 @@ GitHub Actions (`.github/workflows/ci.yml`), bei Push auf `main`, Pull Requests 
 
 Die CI nutzt dank der eingecheckten Lockfiles `npm ci` und feste Komponentenversionen.
 
+### Bench-Test: Anruf auf ein schlafendes Telefon
+
+`test/bench/` prüft auf dem Testbench mit zwei Telefonen, dass ein Anruf ein Telefon im iTWT-Sparmodus
+erreicht (Issue #5). Der Test läuft nicht in der CI. Der Anrufer bekommt eine Firmware mit
+**Auto-Wählen** (`CONFIG_PHONE_TEST_AUTODIAL`, Overlay `sdkconfig.autodial`). Sie ruft den ersten
+Kontakt aus der mDNS-Liste an, so als würde man auf den Kontakt tippen, und legt nach 30 s wieder auf.
+In normalen Builds ist das Auto-Wählen nicht enthalten.
+
+```bash
+idf.py build                                               # Angerufener (normale Firmware) -> build/
+idf.py -B build-autodial -DSDKCONFIG=build-autodial/sdkconfig \
+       -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.autodial" build   # Anrufer -> build-autodial/
+pip install pytest
+pytest test/bench -v --wt-url http://<bench>:8080 \
+       --caller-slot SLOT2 --caller-mac <mac-anrufer> \
+       --callee-slot SLOT1 --callee-mac <mac-angerufener>
+```
+
+Der Test prüft die MACs, flasht nur die App (NVS mit den WLAN-Daten bleibt) und startet beide Boards
+neu, damit der ARP-Cache des Anrufers leer ist. Dann wertet er zwei Anrufe aus:
+
+- Der Angerufene schlief (`iTWT agreed`).
+- RINGING kommt innerhalb von 2 s.
+- Der statische ARP-Eintrag steht ab dem ersten INVITE.
+- Der Angerufene schläft nach dem Auflegen innerhalb von 25 s wieder.
+
+Zum Schluss flasht er dem Anrufer wieder die normale Firmware. Dauer: etwa 5 min.
+
+Bei jedem Lauf, ob bestanden oder nicht, speichert der Test die seriellen Logs beider Boards unter
+`test/bench/logs/<zeit>-caller-<slot>.log` und `…-callee-<slot>.log` (anderer Ort: `--log-dir`). Vor
+jeder Zeile steht die Uhrzeit des Testbench. So lassen sich beide Dateien nebeneinander lesen, etwa
+gesendetes INVITE beim Anrufer gegen empfangenes beim Angerufenen. Bei einem Fehlschlag nennt pytest
+die Pfade.
+
+Zur Fehlersuche lohnt der Blick in diese Logzeilen:
+
+- `call: sig tx/rx …` mit `arp yes/NO`: Ist die MAC der Gegenstelle bekannt?
+- `call: static ARP …`
+- `net: iTWT agreed (…)` mit den ausgehandelten Parametern und `net: iTWT torn down`
+- `autodial: …`
+
+Die Parameter des Auto-Wählens (Zielname, Wartezeit, Klingeldauer, Pause, Anzahl) lassen sich per
+`menuconfig` unter „Telefon: Testfunktionen“ ändern. Bei `ROUNDS=0` wählt der Anrufer endlos, für
+Langzeittests.
+
 ## Einrichten
 
 1. Gerät starten. Ohne gespeicherte Zugangsdaten zeigt das Display SSID und Passwort des softAP.
@@ -149,7 +194,7 @@ RAM-Inhalte, also möglicherweise das WLAN-Passwort: vertraulich behandeln und n
 
 ## Bekannte Grenzen und Entwurfsentscheidungen
 
-- **iTWT und Anrufe widersprechen sich.** iTWT spart Strom, kostet aber Latenz. Deshalb nur im Idle: Ein eingehender Anruf wartet bis zu ~1 s auf den nächsten Service Period (der Anrufer sendet INVITE bis zu ~8 s lang erneut). Während eines Anrufs ist iTWT abgeschaltet. iTWT funktioniert nur, wenn der Router Wi-Fi 6 mit TWT-Responder kann; sonst fällt das Gerät auf Modem-Sleep zurück (Log-Warnung).
+- **iTWT und Anrufe widersprechen sich.** iTWT spart Strom, kostet aber Latenz. Deshalb nur im Idle: Ein eingehender Anruf wartet bis zu ~1 s auf den nächsten Service Period (der Anrufer sendet INVITE bis zu ~10 s lang erneut). Ein schlafendes Telefon empfängt keine Broadcasts, also auch keine ARP-Anfragen. Deshalb veröffentlicht jedes Telefon seine MAC per mDNS, und der Anrufer trägt sie für die Dauer des Anrufs als statischen ARP-Eintrag ein (Issue #5). Während eines Anrufs ist iTWT abgeschaltet. iTWT funktioniert nur, wenn der Router Wi-Fi 6 mit TWT-Responder kann; sonst fällt das Gerät auf Modem-Sleep zurück (Log-Warnung).
 - **Portal erscheint nicht?** Android „Privates DNS“ auf *Automatisch* stellen (fest eingestelltes DNS-over-TLS umgeht die Umleitung), mobile Daten aus, ggf. WLAN vergessen und neu verbinden. Die Probe-Antworten sind absichtlich nie „online“, damit das Portal geöffnet bleibt.
 - **Nur 2,4 GHz.** Der ESP32-C6 hat kein 5-GHz-Funkmodul. Das Netz muss 2,4 GHz mit Wi-Fi 6 anbieten.
 - **mDNS-Multicast ist unter iTWT unzuverlässig.** Die Kontaktsuche läuft deshalb nur bei eingeschaltetem Display.

@@ -1,5 +1,6 @@
 # ESP-IDF
 build/
+build-*/
 sdkconfig
 sdkconfig.old
 managed_components/
@@ -15,3 +16,5 @@ web/.astro/
 .vscode/
 .idea/
 .DS_Store
+test/bench/logs/
+__pycache__/

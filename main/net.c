@@ -91,7 +91,12 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
         s_twt_pending = false;
         if (e->status == ITWT_STATUS_OK) {
             s_twt = true;
-            ESP_LOGI(TAG, "iTWT agreed (flow %d)", e->config.flow_id);
+            ESP_LOGI(TAG, "iTWT agreed (flow %d, cmd %d, %s, %s, interval %u*2^%u us, wake %u x %s)",
+                     e->config.flow_id, e->config.setup_cmd,
+                     e->config.flow_type ? "unannounced" : "announced",
+                     e->config.trigger ? "trigger" : "no trigger",
+                     e->config.wake_invl_mant, e->config.wake_invl_expn, e->config.min_wake_dura,
+                     e->config.wake_duration_unit ? "1024 us" : "256 us");
             if (s_twt_cancel) {
                 /* A call (or the user) woke us while the request was in
                  * flight: never sleep 1 s at a time during a call. */

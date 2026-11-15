@@ -1,11 +1,14 @@
 #pragma once
 #include <stdbool.h>
+#include <stdint.h>
 #include "esp_netif_ip_addr.h"
 #include "app_config.h"
 
 typedef struct {
     char            name[NAME_MAX_LEN + 1];
     esp_ip4_addr_t  ip;
+    uint8_t         mac[6];     /* station MAC from the mDNS TXT record "mac" */
+    bool            has_mac;
 } peer_t;
 
 typedef void (*peers_cb_t)(const peer_t *list, int n);
