@@ -10,6 +10,7 @@
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
+#include "esp_wifi.h"
 #include "board.h"
 #include "adpcm.h"
 
@@ -127,12 +128,26 @@ static void rx_task(void *arg)
 {
     media_t p;
     int last_seq = -1;
+    /* Link statistics, logged every 5 s: 250 frames expected per window. */
+    int got = 0, lost = 0, late = 0;
+    int64_t t_log = esp_timer_get_time();
     while (s_media_run) {
+        int64_t now = esp_timer_get_time();
+        if (now - t_log >= 5000000) {
+            int rssi = 0;
+            esp_wifi_sta_get_rssi(&rssi);
+            ESP_LOGI(TAG, "media 5s: rx %d, lost %d, late %d, rssi %d", got, lost, late, rssi);
+            got = lost = late = 0;
+            t_log = now;
+        }
         struct sockaddr_in from; socklen_t fl = sizeof from;
         int n = recvfrom(s_media_sock, &p, sizeof p, 0, (struct sockaddr *)&from, &fl);
         if (n != sizeof p || p.magic != 0xA1) continue;
         if (from.sin_addr.s_addr != s_peer.sin_addr.s_addr) continue;     /* only our peer */
-        if (last_seq >= 0 && (int16_t)(p.seq - last_seq) <= 0) continue;  /* late / duplicate */
+        int16_t d = last_seq >= 0 ? (int16_t)(p.seq - last_seq) : 1;
+        if (d <= 0) { late++; continue; }                                  /* late / duplicate */
+        got++;
+        if (d > 1) lost += d - 1;
         last_seq = p.seq;
         if (xQueueSend(s_rxq, &p, 0) != pdTRUE) {                          /* full: drop oldest */
             media_t tmp; xQueueReceive(s_rxq, &tmp, 0); xQueueSend(s_rxq, &p, 0);
