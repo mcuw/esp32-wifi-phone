@@ -6,13 +6,13 @@
 #include "app_config.h"
 
 /* Built-in Montserrat has no umlauts: all device-UI strings are ASCII. */
-#if LV_FONT_MONTSERRAT_28
-#define FONT_BIG (&lv_font_montserrat_28)
+#if LV_FONT_MONTSERRAT_36
+#define FONT_BIG (&lv_font_montserrat_36)
 #else
 #define FONT_BIG LV_FONT_DEFAULT
 #endif
-#if LV_FONT_MONTSERRAT_20
-#define FONT_MID (&lv_font_montserrat_20)
+#if LV_FONT_MONTSERRAT_28
+#define FONT_MID (&lv_font_montserrat_28)
 #else
 #define FONT_MID LV_FONT_DEFAULT
 #endif
