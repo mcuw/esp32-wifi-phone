@@ -7,6 +7,8 @@
 #include "freertos/semphr.h"
 #include "freertos/event_groups.h"
 #include "lwip/sockets.h"
+#include "lwip/etharp.h"
+#include "lwip/priv/tcpip_priv.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
@@ -56,11 +58,38 @@ enum { B_CAP = 1, B_PLAY = 2, B_RX = 4, B_RING = 8 };
 
 static void notify(call_state_t st, const char *note) { if (s_cb) s_cb(st, s_peer_name, note); }
 
+/* Is the peer's MAC in our ARP cache? Without it the first datagram triggers a
+ * broadcast ARP request, which a callee sleeping in iTWT may never see. */
+struct arp_q { struct tcpip_api_call_data call; ip4_addr_t ip; bool found; };
+static err_t arp_q_fn(struct tcpip_api_call_data *c)
+{
+    struct arp_q *q = (struct arp_q *)c;
+    struct eth_addr *eth; const ip4_addr_t *ip;
+    q->found = netif_default && etharp_find_addr(netif_default, &q->ip, &eth, &ip) >= 0;
+    return ERR_OK;
+}
+static bool peer_in_arp(void)
+{
+    struct arp_q q = { .found = false };
+    q.ip.addr = s_peer.sin_addr.s_addr;
+    tcpip_api_call(arp_q_fn, &q.call);
+    return q.found;
+}
+
+static const char *sig_name(uint8_t t)
+{
+    static const char *n[] = { "?", "INVITE", "RINGING", "ACCEPT", "REJECT", "BYE" };
+    return t < sizeof n / sizeof n[0] ? n[t] : "?";
+}
+
 static void sig_send(uint8_t type)
 {
     sig_t m = { .magic = 0xC6, .type = type, .call_id = s_call_id };
     strlcpy(m.name, s_my_name, sizeof m.name);
-    sendto(s_sig_sock, &m, sizeof m, 0, (struct sockaddr *)&s_peer, sizeof s_peer);
+    bool arp = peer_in_arp();
+    int r = sendto(s_sig_sock, &m, sizeof m, 0, (struct sockaddr *)&s_peer, sizeof s_peer);
+    ESP_LOGI(TAG, "sig tx %s -> %s (try %d, arp %s, sendto %d)", sig_name(type),
+             inet_ntoa(s_peer.sin_addr), s_invite_tries, arp ? "yes" : "NO", r);
 }
 
 /* ---- ringer (also used as ring-back tone) ------------------------------ */
@@ -249,6 +278,7 @@ static void sig_task(void *arg)
         xSemaphoreTake(s_mx, portMAX_DELAY);
         if (n == sizeof m && m.magic == 0xC6) {
             m.name[NAME_MAX_LEN] = 0;
+            ESP_LOGI(TAG, "sig rx %s <- %s (state %d)", sig_name(m.type), inet_ntoa(from.sin_addr), (int)s_state);
             bool same = (m.call_id == s_call_id) && from.sin_addr.s_addr == s_peer.sin_addr.s_addr;
             switch (m.type) {
             case SIG_INVITE:
