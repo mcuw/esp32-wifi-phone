@@ -5,6 +5,8 @@
 Zwei (oder mehr) Geräte im selben WLAN, Kontaktliste per mDNS, Sprache per UDP.
 ESP-IDF **v6.1**, Wi-Fi 6 mit **iTWT**, WLAN-Zugang per **softAP mit Captive Portal**, gespeichert im **NVS**.
 
+**Status:** Firmware und Einrichtungsseite bauen (lokal und in der CI), die Firmware läuft auf dem Board.
+
 ## Architektur
 
 ```
@@ -31,25 +33,43 @@ Das spart RAM (kein PSRAM auf dem Board) und vermeidet Heap-Fragmentierung.
 | `main/json_util.c` | Kleiner JSON-Parser/-Escaper für die Setup-API |
 | `main/dns_server.c` | Captive-Portal-DNS (beantwortet jede A-Anfrage mit der AP-Adresse) |
 | `main/storage.c` | NVS: SSID, Passwort, Gerätename, Setup-Flag |
-| `main/board.c` | Display/Touch über BSP; ES8311 + ES7210 + I2S direkt (Pins aus `docs/hardware.md`) |
+| `main/board.c` | Display/Touch über BSP; ES8311 + ES7210 + I2S direkt (Pins aus dem Waveshare-Repo/Schaltbild) |
 | `main/peers.c` | mDNS-Ankündigung und -Suche |
 | `main/call.c` | Anruf-Zustandsmaschine, Jitter-Buffer, ADPCM, Klingelton |
 | `main/ui.c` | Kontakte, Anruf, Einstellungen, Provisioning-Anzeige |
-| `web/` | Astro + Qwik Einrichtungsseite, `src/lib/api.ts` = kleiner `fetch`-Client |
+| `web/` | Astro 7 + Qwik 2 Einrichtungsseite, `src/lib/api.ts` = kleiner `fetch`-Client |
+
+### Flash-Aufteilung (16 MB, `partitions.csv`)
+
+| Partition | Größe | Inhalt |
+|---|---|---|
+| `ota_0`, `ota_1` | je 3 MiB | App-Slots für spätere OTA-Updates |
+| `nvs` | 24 KiB | Zugangsdaten, Gerätename (für HMAC-basierte NVS-Verschlüsselung vorbereitet) |
+| `otadata`, `phy_init` | 8 + 4 KiB | OTA-Status, PHY-Kalibrierung |
+| `coredump` | 64 KiB | Absturzabbild (ELF), `encrypted` |
+| `www` | ~1,8 MiB | SPIFFS mit dem Build der Einrichtungsseite (`web/dist`) |
+| `storage` | 8 MiB | LittleFS für Anwendungsdaten (braucht `joltwallet/littlefs`) |
+
+Die Partitionstabelle liegt bei `0xF000`, damit ein Bootloader mit Secure Boot V2 + Flash-Encryption
+davor passt.
 
 ## Bauen
 
 ```bash
 # 1. Web-UI bauen (erzeugt web/dist, wird in die Partition "www" geflasht)
-cd web && npm install && npm run build && cd ..
+cd web && npm ci && npm run build && cd ..
 
 # 2. Firmware (ESP-IDF v6.1, z. B. installiert mit: eim install -i v6.1)
 idf.py set-target esp32c6
 idf.py build flash monitor
 ```
 
-Falls `npm install` bei `@qwikdev/astro` Versionskonflikte meldet: `npx astro add @qwikdev/astro`
-ausführen (setzt passende Versionen). Es gibt auch die Qwik-v2-Variante `@qwik.dev/astro` + `@qwik.dev/core`.
+`idf.py flash` schreibt Bootloader, Partitionstabelle, App und das SPIFFS-Abbild `www` in einem Schritt.
+`web/dist` muss deshalb vor dem Firmware-Build existieren.
+
+Versionen sind festgenagelt: `web/package-lock.json` (Astro 7, `@qwik.dev/astro`, `@qwik.dev/core` 2.x)
+und `dependencies.lock` (ESP-IDF-Komponenten) sind eingecheckt. Komponenten aktualisieren:
+`idf.py update-dependencies`, Web-Pakete: `npm update` in `web/`, danach die Lockfiles committen.
 
 ## Tests und CI
 
@@ -67,8 +87,7 @@ GitHub Actions (`.github/workflows/ci.yml`), bei Push auf `main`, Pull Requests 
    `esptool --chip esp32c6 write_flash @flash_args`.
 4. **Release** (nur bei Tag `v*`): hängt die Firmware als ZIP an ein GitHub-Release.
 
-Sobald lokal einmal gebaut wurde, `web/package-lock.json` und `dependencies.lock` committen:
-Die CI nutzt dann `npm ci` und feste Komponentenversionen.
+Die CI nutzt dank der eingecheckten Lockfiles `npm ci` und feste Komponentenversionen.
 
 ## Einrichten
 
@@ -104,24 +123,29 @@ curl -X DELETE http://192.168.4.1/api/coredump          # danach löschen
 die `c6_phone.elf` genau des abgestürzten Builds (liegt im CI-Artefakt). **Das Abbild enthält
 RAM-Inhalte, also möglicherweise das WLAN-Passwort: vertraulich behandeln und nach dem Auswerten löschen.**
 
-## Verifikationsstand (bitte lesen)
+## Verifikationsstand
 
-**Geprüft:**
-- Pin-Map, Codecs (ES8311 Lautsprecher, ES7210 Dual-Mikro), CO5300/FT3168 gegen das Waveshare-Repo (`docs/hardware.md`) und das Schaltbild.
-- ESP-IDF v6.1 ist veröffentlicht; iTWT-API (`esp_wifi_sta_itwt_setup`, `esp_wifi_sta_itwt_teardown`, `WIFI_EVENT_ITWT_SETUP`) gegen Espressif-Quellen abgeglichen.
-- Auf dem Host getestet: `api.ts` gegen einen Mock-Server, ADPCM-Roundtrip (30,7 dB SNR bei 20 % Paketverlust), JSON-Parser mit Anführungszeichen/Backslash.
+**Erledigt:**
+- **Firmware baut** mit ESP-IDF v6.1 für `esp32c6` (lokal und in der CI) und **läuft auf dem Board**
+  (Waveshare ESP32-C6-Touch-AMOLED-2.06).
+- **Einrichtungsseite baut** (Astro 7 + Qwik 2) und passt in die Partition `www`.
+- BSP `waveshare/esp32_c6_touch_amoled_2_06` v2, `esp_codec_dev` und `mdns` lösen auf und sind in
+  `dependencies.lock` festgehalten.
+- iTWT-API unter v6.1: `wifi_twt_setup_config_t`, `esp_wifi_sta_itwt_setup/teardown` und
+  `WIFI_EVENT_ITWT_SETUP` kompilieren. Hinweise zur v6-API: Der Setup-Status im Event ist ein
+  `esp_err_t`, `WIFI_BW_HT20` heißt seit v6.0 `WIFI_BW20`, `esp_wifi_he.h` muss explizit eingebunden werden.
+- Pin-Map, Codecs (ES8311 Lautsprecher, ES7210 Dual-Mikro), CO5300/FT3168 gegen das Waveshare-Repo und das Schaltbild abgeglichen.
+- Host-Tests: `api.ts` gegen einen Mock-Server, ADPCM-Roundtrip (30,7 dB SNR bei 20 % Paketverlust),
+  JSON-Parser mit Anführungszeichen/Backslash, DNS-Antwortbau (A mit EDNS-Zusatzrecord, AAAA → leere
+  Antwort, kaputte Pakete werden ignoriert).
 
-- Auf dem Host getestet: DNS-Antwortbau (A mit EDNS-Zusatzrecord, AAAA → leere Antwort, kaputte Pakete werden ignoriert).
-
-**Nicht geprüft (kein ESP-IDF, kein Netz, keine Hardware in meiner Umgebung):**
-- **Die Firmware wurde nicht kompiliert und nicht auf Hardware ausgeführt.** Rechne mit einer Runde Compilerfehler.
-- **BSP-API:** Ich konnte die Header von `waveshare/esp32_c6_touch_amoled_2_06` v2 nicht lesen. `board.c` nutzt die übliche Espressif-BSP-Konvention (`bsp/esp-bsp.h`, `bsp_display_start()`, `bsp_display_lock/unlock()`, `bsp_display_brightness_set()`). Namen ggf. anpassen; alles Board-spezifische steckt in `board.c`.
-- **I²C-Port:** `board.c` greift mit `i2c_master_get_bus_handle(I2C_NUM_0)` auf den BSP-Bus zu. Falls das BSP einen anderen Port nutzt: `BOARD_I2C_PORT` setzen.
-- **BOOT-Taste** ist als GPIO 9 angenommen. Gegen das Schaltbild prüfen.
-- **TWT-API unter v6.1:** `wifi_twt_setup_config_t` samt Feldern wird vom v6.1-Compiler akzeptiert (CI-Log). Der Setup-Status im Event ist ein `esp_err_t` (1 = Erfolg), `WIFI_BW_HT20` heißt seit v6.0 `WIFI_BW20`, und `esp_wifi_he.h` muss explizit eingebunden werden. Ob iTWT zur Laufzeit klappt, ist weiterhin ungetestet.
-- **Komponenten in IDF 6:** Falls eine Kernkomponente (z. B. `spiffs`) in die Registry verschoben wurde, mit `idf.py add-dependency` nachziehen.
-- **Captive Portal auf echten Geräten:** Ablauf folgt dem Muster des IDF-Beispiels `captive_portal` (DNS-Umleitung + DHCP-Option 114 per `ESP_NETIF_CAPTIVEPORTAL_URI`), aber ich konnte kein Android/iOS/Windows-Gerät testen. Include-Pfad `dhcpserver/dhcpserver.h` für `dhcps_offer_t` ggf. anpassen.
-- **Astro/Qwik-Build** wurde nicht ausgeführt (kein npm-Zugriff). Die Dateien sind nach der Dokumentation der Integration aufgebaut, Versionen sind nicht festgenagelt.
+**Noch gezielt zu prüfen:**
+- **iTWT zur Laufzeit:** Kommt die Vereinbarung mit dem Router zustande (Log `WIFI_EVENT_ITWT_SETUP`),
+  und wie hoch ist der Stromverbrauch im Idle?
+- **Captive Portal** auf verschiedenen Geräten (Android, iOS, Windows, macOS).
+- **Anrufqualität:** Latenz, Echo/Ducking, Verhalten bei Paketverlust im echten WLAN.
+- **BOOT-Taste** als GPIO 9 (Einstieg in den Einrichtungsmodus beim Start).
+- **Core-Dump-Abruf** über `/api/coredump` mit aktivierter Flash-Encryption.
 
 ## Bekannte Grenzen und Entwurfsentscheidungen
 
