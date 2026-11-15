@@ -112,6 +112,8 @@ static void build_contacts(void)
 static void build_settings(void)
 {
     scr_set = screen();
+    /* Touch targets were too close together at the default 12 px. */
+    lv_obj_set_style_pad_row(scr_set, 40, 0);
     label(scr_set, "Einstellungen", FONT_BIG, C_TEXT);
     label(scr_set, "Lautstaerke", LV_FONT_DEFAULT, C_DIM);
     lv_obj_t *sl = lv_slider_create(scr_set);
