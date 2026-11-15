@@ -5,6 +5,7 @@
 #include "freertos/queue.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_core_dump.h"
 #include "app_config.h"
 #include "storage.h"
 #include "board.h"
@@ -121,9 +122,24 @@ static void on_net(net_state_t st, bool itwt)
     }
 }
 
+/* The coredump partition can still hold bytes from an older partition layout
+ * (before 72f66fc, phy_init lived at its offset) - flashing never touches it.
+ * Its first word then is no valid dump size, and ESP-IDF logs "Incorrect size
+ * of core dump image" on every boot until the first real crash (issue #7).
+ * Erase it once in that case. A valid dump, or one with a bad checksum, has a
+ * plausible size and is left alone for /api/coredump. */
+static void coredump_discard_foreign_data(void)
+{
+    size_t addr, size;
+    if (esp_core_dump_image_get(&addr, &size) != ESP_ERR_INVALID_SIZE) return;
+    esp_err_t e = esp_core_dump_image_erase();
+    ESP_LOGW(TAG, "coredump partition held no core dump (leftover data?) - erased: %s", esp_err_to_name(e));
+}
+
 void app_main(void)
 {
     ESP_ERROR_CHECK(storage_init());
+    coredump_discard_foreign_data();
     ESP_ERROR_CHECK(board_init());
 
     bool have_wifi = storage_load(&s_cfg);

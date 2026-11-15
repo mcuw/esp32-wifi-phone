@@ -168,6 +168,18 @@ curl -X DELETE http://192.168.4.1/api/coredump          # danach löschen
 die `c6_phone.elf` genau des abgestürzten Builds (liegt im CI-Artefakt). **Das Abbild enthält
 RAM-Inhalte, also möglicherweise das WLAN-Passwort: vertraulich behandeln und nach dem Auswerten löschen.**
 
+**Nach einer Änderung der Partitionstabelle** bleiben Daten an den verschobenen Stellen liegen, denn
+`idf.py flash` schreibt nur Bootloader, Partitionstabelle, App, `otadata` und `www`. Steht in der
+Partition `coredump` dann etwas anderes als ein Absturzabbild, meldet ESP-IDF beim Booten
+`Incorrect size of core dump image`. Die Firmware löscht die Partition in diesem Fall einmalig
+(Log `coredump partition held no core dump … erased`), ab dem nächsten Boot ist die Meldung weg.
+Sauberer ist es, nach einer Layoutänderung einmal den ganzen Flash zu löschen. Das löscht auch NVS,
+das Telefon muss danach neu eingerichtet werden:
+
+```bash
+idf.py erase-flash flash          # bzw. esptool --chip esp32c6 erase-flash
+```
+
 ## Verifikationsstand
 
 **Erledigt:**
