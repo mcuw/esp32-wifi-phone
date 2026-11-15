@@ -1,0 +1,9 @@
+# Overlay für den Bench-Test test/bench/test_call_sleeping.py (Issue #5).
+# Nur in einem eigenen Build-Verzeichnis verwenden:
+#   idf.py -B build-autodial -DSDKCONFIG=build-autodial/sdkconfig \
+#          -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.autodial" build
+CONFIG_PHONE_TEST_AUTODIAL=y
+CONFIG_PHONE_TEST_AUTODIAL_DELAY_S=45
+CONFIG_PHONE_TEST_AUTODIAL_RING_S=30
+CONFIG_PHONE_TEST_AUTODIAL_PAUSE_S=50
+CONFIG_PHONE_TEST_AUTODIAL_ROUNDS=2
