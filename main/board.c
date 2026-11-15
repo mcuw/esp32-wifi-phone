@@ -51,10 +51,14 @@ void board_unlock(void)     { bsp_display_unlock(); }
 void board_set_brightness(int p) { bsp_display_brightness_set(p); }
 bool board_boot_button_pressed(void) { return gpio_get_level(PIN_BOOT) == 0; }
 
-esp_err_t board_audio_start(void)
+/* I2S channels and codec devices are created once and then only opened and
+ * closed per call. Deleting them is not enough to tear them down: esp_codec_dev
+ * keeps every I2S data interface in a per-port list until
+ * audio_codec_delete_data_if(), and pairs a new one with the stale entry -
+ * whose I2S channels we had deleted. The second call after boot then crashed in
+ * i2s_channel_disable() (callee: no ringing, caller: "Nicht erreichbar"). */
+static esp_err_t audio_create(void)
 {
-    if (s_audio_on) return ESP_OK;
-
     /* The touch controller already owns the I2C bus: share it. */
     i2c_master_bus_handle_t bus;
     ESP_ERROR_CHECK(i2c_master_get_bus_handle(BOARD_I2C_PORT, &bus));
@@ -100,6 +104,13 @@ esp_err_t board_audio_start(void)
         .dev_type = ESP_CODEC_DEV_TYPE_IN, .codec_if = es7210_codec_new(&e7210), .data_if = data_if,
     };
     s_mic = esp_codec_dev_new(&in_cfg);
+    return (s_spk && s_mic) ? ESP_OK : ESP_FAIL;
+}
+
+esp_err_t board_audio_start(void)
+{
+    if (s_audio_on) return ESP_OK;
+    if (!s_spk && audio_create() != ESP_OK) return ESP_FAIL;
 
     esp_codec_dev_sample_info_t fs = {
         .sample_rate = AUDIO_RATE, .channel = 2, .bits_per_sample = 16,
@@ -108,7 +119,7 @@ esp_err_t board_audio_start(void)
     ESP_ERROR_CHECK(esp_codec_dev_open(s_spk, &fs) == ESP_CODEC_DEV_OK ? ESP_OK : ESP_FAIL);
     ESP_ERROR_CHECK(esp_codec_dev_open(s_mic, &fs) == ESP_CODEC_DEV_OK ? ESP_OK : ESP_FAIL);
     esp_codec_dev_set_out_vol(s_spk, s_volume);
-    esp_codec_dev_set_in_gain(s_mic, 30.0f);
+    esp_codec_dev_set_in_gain(s_mic, MIC_GAIN_DB);
 
     s_audio_on = true;
     ESP_LOGI(TAG, "audio started");
@@ -118,14 +129,10 @@ esp_err_t board_audio_start(void)
 void board_audio_stop(void)
 {
     if (!s_audio_on) return;
+    /* Closing powers the codecs down, switches the PA off and disables the
+     * I2S channels; the devices stay for the next call (see audio_create). */
     esp_codec_dev_close(s_spk);
     esp_codec_dev_close(s_mic);
-    esp_codec_dev_delete(s_spk);
-    esp_codec_dev_delete(s_mic);
-    i2s_channel_disable(s_tx);
-    i2s_channel_disable(s_rx);
-    i2s_del_channel(s_tx);
-    i2s_del_channel(s_rx);
     s_audio_on = false;
 }
 

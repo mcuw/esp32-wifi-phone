@@ -6,13 +6,13 @@
 #include "app_config.h"
 
 /* Built-in Montserrat has no umlauts: all device-UI strings are ASCII. */
-#if LV_FONT_MONTSERRAT_28
-#define FONT_BIG (&lv_font_montserrat_28)
+#if LV_FONT_MONTSERRAT_36
+#define FONT_BIG (&lv_font_montserrat_36)
 #else
 #define FONT_BIG LV_FONT_DEFAULT
 #endif
-#if LV_FONT_MONTSERRAT_20
-#define FONT_MID (&lv_font_montserrat_20)
+#if LV_FONT_MONTSERRAT_28
+#define FONT_MID (&lv_font_montserrat_28)
 #else
 #define FONT_MID LV_FONT_DEFAULT
 #endif
@@ -112,6 +112,8 @@ static void build_contacts(void)
 static void build_settings(void)
 {
     scr_set = screen();
+    /* Touch targets were too close together at the default 12 px. */
+    lv_obj_set_style_pad_row(scr_set, 40, 0);
     label(scr_set, "Einstellungen", FONT_BIG, C_TEXT);
     label(scr_set, "Lautstaerke", LV_FONT_DEFAULT, C_DIM);
     lv_obj_t *sl = lv_slider_create(scr_set);

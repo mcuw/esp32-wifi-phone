@@ -7,9 +7,12 @@
 #include "freertos/semphr.h"
 #include "freertos/event_groups.h"
 #include "lwip/sockets.h"
+#include "lwip/etharp.h"
+#include "lwip/priv/tcpip_priv.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
+#include "esp_wifi.h"
 #include "board.h"
 #include "adpcm.h"
 
@@ -55,11 +58,38 @@ enum { B_CAP = 1, B_PLAY = 2, B_RX = 4, B_RING = 8 };
 
 static void notify(call_state_t st, const char *note) { if (s_cb) s_cb(st, s_peer_name, note); }
 
+/* Is the peer's MAC in our ARP cache? Without it the first datagram triggers a
+ * broadcast ARP request, which a callee sleeping in iTWT may never see. */
+struct arp_q { struct tcpip_api_call_data call; ip4_addr_t ip; bool found; };
+static err_t arp_q_fn(struct tcpip_api_call_data *c)
+{
+    struct arp_q *q = (struct arp_q *)c;
+    struct eth_addr *eth; const ip4_addr_t *ip;
+    q->found = netif_default && etharp_find_addr(netif_default, &q->ip, &eth, &ip) >= 0;
+    return ERR_OK;
+}
+static bool peer_in_arp(void)
+{
+    struct arp_q q = { .found = false };
+    q.ip.addr = s_peer.sin_addr.s_addr;
+    tcpip_api_call(arp_q_fn, &q.call);
+    return q.found;
+}
+
+static const char *sig_name(uint8_t t)
+{
+    static const char *n[] = { "?", "INVITE", "RINGING", "ACCEPT", "REJECT", "BYE" };
+    return t < sizeof n / sizeof n[0] ? n[t] : "?";
+}
+
 static void sig_send(uint8_t type)
 {
     sig_t m = { .magic = 0xC6, .type = type, .call_id = s_call_id };
     strlcpy(m.name, s_my_name, sizeof m.name);
-    sendto(s_sig_sock, &m, sizeof m, 0, (struct sockaddr *)&s_peer, sizeof s_peer);
+    bool arp = peer_in_arp();
+    int r = sendto(s_sig_sock, &m, sizeof m, 0, (struct sockaddr *)&s_peer, sizeof s_peer);
+    ESP_LOGI(TAG, "sig tx %s -> %s (try %d, arp %s, sendto %d)", sig_name(type),
+             inet_ntoa(s_peer.sin_addr), s_invite_tries, arp ? "yes" : "NO", r);
 }
 
 /* ---- ringer (also used as ring-back tone) ------------------------------ */
@@ -99,14 +129,18 @@ static void cap_task(void *arg)
     media_t pkt = { .magic = 0xA1 };
     adpcm_state_t st = { 0, 0 };
     uint16_t seq = 0;
-    int gain_q8 = 256;
+    int gain_q8 = 256, hang = 0;
     while (s_media_run) {
         if (board_mic_read(pcm, AUDIO_FRAME) != AUDIO_FRAME) { vTaskDelay(pdMS_TO_TICKS(5)); continue; }
 
-        /* Crude speakerphone echo ducking (no AEC on this MCU, see README):
-         * while the far end is loud, attenuate the mic path. */
-        int target = s_far_level > 1500 ? 64 : 256;
-        gain_q8 += (target - gain_q8) / 4;
+        /* Half-duplex echo suppression (no AEC on this MCU, see README):
+         * while the far end is audible, duck the mic hard and at once, and
+         * hold it for a moment so the acoustic tail does not leak back. */
+        if (s_far_level > ECHO_FAR_ACTIVE) hang = ECHO_HANG_FRAMES;
+        else if (hang > 0) hang--;
+        int target = hang > 0 ? ECHO_DUCK_Q8 : 256;
+        if (target < gain_q8) gain_q8 = target;          /* attack: immediate */
+        else gain_q8 += (target - gain_q8 + 3) / 4;      /* release: ~4 frames */
         for (int i = 0; i < AUDIO_FRAME; i++) pcm[i] = (int16_t)((pcm[i] * gain_q8) >> 8);
 
         pkt.seq = seq++;
@@ -123,12 +157,26 @@ static void rx_task(void *arg)
 {
     media_t p;
     int last_seq = -1;
+    /* Link statistics, logged every 5 s: 250 frames expected per window. */
+    int got = 0, lost = 0, late = 0;
+    int64_t t_log = esp_timer_get_time();
     while (s_media_run) {
+        int64_t now = esp_timer_get_time();
+        if (now - t_log >= 5000000) {
+            int rssi = 0;
+            esp_wifi_sta_get_rssi(&rssi);
+            ESP_LOGI(TAG, "media 5s: rx %d, lost %d, late %d, rssi %d", got, lost, late, rssi);
+            got = lost = late = 0;
+            t_log = now;
+        }
         struct sockaddr_in from; socklen_t fl = sizeof from;
         int n = recvfrom(s_media_sock, &p, sizeof p, 0, (struct sockaddr *)&from, &fl);
         if (n != sizeof p || p.magic != 0xA1) continue;
         if (from.sin_addr.s_addr != s_peer.sin_addr.s_addr) continue;     /* only our peer */
-        if (last_seq >= 0 && (int16_t)(p.seq - last_seq) <= 0) continue;  /* late / duplicate */
+        int16_t d = last_seq >= 0 ? (int16_t)(p.seq - last_seq) : 1;
+        if (d <= 0) { late++; continue; }                                  /* late / duplicate */
+        got++;
+        if (d > 1) lost += d - 1;
         last_seq = p.seq;
         if (xQueueSend(s_rxq, &p, 0) != pdTRUE) {                          /* full: drop oldest */
             media_t tmp; xQueueReceive(s_rxq, &tmp, 0); xQueueSend(s_rxq, &p, 0);
@@ -230,6 +278,7 @@ static void sig_task(void *arg)
         xSemaphoreTake(s_mx, portMAX_DELAY);
         if (n == sizeof m && m.magic == 0xC6) {
             m.name[NAME_MAX_LEN] = 0;
+            ESP_LOGI(TAG, "sig rx %s <- %s (state %d)", sig_name(m.type), inet_ntoa(from.sin_addr), (int)s_state);
             bool same = (m.call_id == s_call_id) && from.sin_addr.s_addr == s_peer.sin_addr.s_addr;
             switch (m.type) {
             case SIG_INVITE:

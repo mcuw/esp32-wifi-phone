@@ -25,6 +25,7 @@ static net_state_t     s_state = NET_IDLE;
 static bool            s_want_sta;
 static bool            s_twt;            /* iTWT agreement active */
 static bool            s_twt_pending;
+static bool            s_twt_cancel;     /* active again while setup was pending: tear down on arrival */
 static int             s_retry;
 static esp_timer_handle_t s_retry_timer;
 
@@ -71,9 +72,12 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
     case WIFI_EVENT_STA_START:
         if (s_want_sta) esp_wifi_connect();
         break;
-    case WIFI_EVENT_STA_DISCONNECTED:
+    case WIFI_EVENT_STA_DISCONNECTED: {
+        wifi_event_sta_disconnected_t *d = (wifi_event_sta_disconnected_t *)data;
+        ESP_LOGW(TAG, "disconnected: reason %d, rssi %d, retry %d", d->reason, d->rssi, s_retry);
         s_twt = false;
         s_twt_pending = false;
+        s_twt_cancel = false;
         if (s_want_sta) {
             set_state(NET_CONNECTING);
             uint64_t delay_ms = 500ULL << (s_retry < 5 ? s_retry : 5);   /* 0.5 s .. 16 s */
@@ -81,14 +85,23 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
             esp_timer_start_once(s_retry_timer, delay_ms * 1000ULL);
         }
         break;
+    }
     case WIFI_EVENT_ITWT_SETUP: {
         wifi_event_sta_itwt_setup_t *e = (wifi_event_sta_itwt_setup_t *)data;
         s_twt_pending = false;
         if (e->status == ITWT_STATUS_OK) {
             s_twt = true;
             ESP_LOGI(TAG, "iTWT agreed (flow %d)", e->config.flow_id);
+            if (s_twt_cancel) {
+                /* A call (or the user) woke us while the request was in
+                 * flight: never sleep 1 s at a time during a call. */
+                s_twt_cancel = false;
+                ESP_LOGW(TAG, "iTWT arrived after wake-up - tearing down");
+                esp_wifi_sta_itwt_teardown(e->config.flow_id);
+            }
         } else {
             s_twt = false;
+            s_twt_cancel = false;
             ESP_LOGW(TAG, "iTWT setup failed (status %d) - AP may not support TWT; using modem sleep", e->status);
         }
         if (s_cb) s_cb(s_state, s_twt);
@@ -209,7 +222,7 @@ void net_power_idle(void)
         ESP_LOGW(TAG, "AP did not negotiate HE20 (got %d): no iTWT, modem sleep only", (int)mode);
         return;
     }
-    if (s_twt || s_twt_pending) return;
+    if (s_twt || s_twt_pending) { s_twt_cancel = false; return; }   /* idle again: keep the pending request */
 
     /* Struct name: wifi_twt_setup_config_t in current headers (esp_wifi_he_types.h);
      * older IDF releases call it wifi_itwt_setup_config_t. */
@@ -237,6 +250,7 @@ void net_power_active(void)
 {
     if (s_state != NET_ONLINE) return;
     if (s_twt) esp_wifi_sta_itwt_teardown(0);
+    else if (s_twt_pending) s_twt_cancel = true;  /* answer still pending: drop it when it comes */
     esp_wifi_set_ps(WIFI_PS_NONE);
 }
 
