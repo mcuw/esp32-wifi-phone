@@ -1,5 +1,4 @@
 #pragma once
-#define APP_FW_VERSION      "0.1.0"
 #define NVS_NS              "phone"
 #define NAME_MAX_LEN        24
 #define PEER_MAX            16

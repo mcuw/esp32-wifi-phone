@@ -50,13 +50,15 @@ jobs:
       - name: Build
         working-directory: web
         run: npm run build
-      - name: Check output fits the ~1.8 MiB "www" partition
+      # The page is compiled into the app (tools/pack_web.py, issue #16) and
+      # takes room in each 3 MiB OTA slot - keep it small.
+      - name: Check output size (embedded in the app)
         working-directory: web
         run: |
           test -f dist/index.html
           kib=$(du -sk dist | cut -f1)
           echo "dist size: ${kib} KiB"
-          [ "$kib" -lt 1650 ]
+          [ "$kib" -lt 512 ]
       - uses: actions/upload-artifact@v7
         with:
           name: web-dist
@@ -69,7 +71,17 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      # main/CMakeLists.txt flashes web/dist into the "www" partition
+        with:
+          fetch-depth: 0              # tags for git describe
+      # The firmware version (esp_app_desc_t.version, compared by the OTA
+      # update) comes from the tag: "v0.2.0", or "v0.2.0-3-gabc1234" between
+      # releases. Written here because git inside the build container may
+      # refuse the checkout (other owner).
+      - name: Version from git tag
+        run: |
+          git describe --tags --always --dirty > version.txt
+          echo "firmware version: $(cat version.txt)"
+      # main/CMakeLists.txt embeds web/dist into the app
       - uses: actions/download-artifact@v7
         with:
           name: web-dist
@@ -86,7 +98,7 @@ jobs:
           mkdir -p out
           cd build
           cp --parents bootloader/bootloader.bin partition_table/partition-table.bin ota_data_initial.bin \
-             c6_phone.bin www.bin flash_args flasher_args.json ../out/
+             c6_phone.bin flash_args flasher_args.json ../out/
           cp c6_phone.elf ../out/
       - uses: actions/upload-artifact@v7
         with:
@@ -106,10 +118,29 @@ jobs:
         with:
           name: firmware-esp32c6
           path: fw
+      # The phones fetch releases/latest/download/ota.json and then the app
+      # image it names (main/ota.c). The image must carry the tag as version,
+      # otherwise the phone rejects it after the download.
+      - name: Check image version = tag
+        run: |
+          python3 - fw/c6_phone.bin "$GITHUB_REF_NAME" <<'PY'
+          import sys
+          d = open(sys.argv[1], "rb").read()
+          i = d.find(bytes.fromhex("3254cdab"))           # esp_app_desc_t magic
+          v = d[i + 16:i + 48].split(b"\0")[0].decode() if i >= 0 else None
+          print("image version:", v)
+          sys.exit(0 if v == sys.argv[2] else f"image version {v} != tag {sys.argv[2]}")
+          PY
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           (cd fw && rm -f c6_phone.elf && zip -qr ../esp32c6-phone-${GITHUB_REF_NAME}.zip .)
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes \
-             "esp32c6-phone-${GITHUB_REF_NAME}.zip"
+          cp fw/c6_phone.bin c6_phone.bin
+          printf '{"version":"%s","url":"https://github.com/%s/releases/download/%s/c6_phone.bin"}\n' \
+             "$GITHUB_REF_NAME" "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" > ota.json
+          cat ota.json
+          # "v1.2.0-rc1" -> pre-release: not "latest", so no phone is offered it
+          pre=; case "$GITHUB_REF_NAME" in *-*) pre=--prerelease ;; esac
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes $pre \
+             "esp32c6-phone-${GITHUB_REF_NAME}.zip" c6_phone.bin ota.json

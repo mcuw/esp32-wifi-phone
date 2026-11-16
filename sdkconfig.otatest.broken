@@ -1,0 +1,2 @@
+# Image C für test/bench/test_ota.py: meldet sich nie als gültig (Rollback-Test).
+CONFIG_PHONE_TEST_OTA_NEVER_VALID=y

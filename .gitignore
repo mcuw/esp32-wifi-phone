@@ -18,3 +18,5 @@ web/.astro/
 .DS_Store
 test/bench/logs/
 __pycache__/
+sdkconfig.otatest.local
+version.txt

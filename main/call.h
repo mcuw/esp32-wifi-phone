@@ -12,3 +12,6 @@ esp_err_t   call_dial(const peer_t *p);
 void        call_accept(void);
 void        call_hangup(void);       /* hang up / reject / cancel */
 call_state_t call_state(void);
+/* Firmware update: on=true blocks new calls (incoming ones get "busy").
+ * Fails (false) while a call is in progress - then nothing changes. */
+bool        call_block(bool on);

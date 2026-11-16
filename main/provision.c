@@ -5,7 +5,6 @@
 #include <inttypes.h>
 #include "freertos/FreeRTOS.h"
 #include "esp_log.h"
-#include "esp_spiffs.h"
 #include "esp_http_server.h"
 #include "esp_system.h"
 #include "esp_timer.h"
@@ -19,6 +18,8 @@
 #include "storage.h"
 #include "dns_server.h"
 #include "json_util.h"
+#include "version.h"
+#include "web_files.h"
 
 static const char *TAG = "prov";
 
@@ -45,7 +46,7 @@ static esp_err_t api_info(httpd_req_t *req)
     uint8_t m[6]; esp_read_mac(m, ESP_MAC_WIFI_STA);
     char nm[2 * NAME_MAX_LEN + 8], buf[160];
     json_escape(c.name, nm, sizeof nm);
-    snprintf(buf, sizeof buf, "{\"id\":\"%02X%02X%02X\",\"name\":\"%s\",\"fw\":\"%s\"}", m[3], m[4], m[5], nm, APP_FW_VERSION);
+    snprintf(buf, sizeof buf, "{\"id\":\"%02X%02X%02X\",\"name\":\"%s\",\"fw\":\"%s\"}", m[3], m[4], m[5], nm, version_display(esp_app_get_description()->version));
     return send_json(req, buf);
 }
 
@@ -199,21 +200,6 @@ static esp_err_t api_coredump_erase(httpd_req_t *req)
 
 /* ------------------------------------------------------- static HTTP ---- */
 
-static const char *mime(const char *p)
-{
-    const char *e = strrchr(p, '.');
-    if (!e) return "application/octet-stream";
-    if (!strcmp(e, ".html")) return "text/html; charset=utf-8";
-    if (!strcmp(e, ".js") || !strcmp(e, ".mjs")) return "text/javascript";
-    if (!strcmp(e, ".css"))  return "text/css";
-    if (!strcmp(e, ".json")) return "application/json";
-    if (!strcmp(e, ".svg"))  return "image/svg+xml";
-    if (!strcmp(e, ".png"))  return "image/png";
-    if (!strcmp(e, ".ico"))  return "image/x-icon";
-    if (!strcmp(e, ".woff2")) return "font/woff2";
-    return "application/octet-stream";
-}
-
 /* Captive portal: the DNS server sends every name to us, so the OS probes (Android
  * /generate_204, Apple /hotspot-detect.html, Windows /connecttest.txt, Firefox
  * /canonical.html ...) arrive with a foreign Host header. Anything not addressed to
@@ -237,6 +223,13 @@ static esp_err_t redirect_portal(httpd_req_t *req)
     return httpd_resp_send(req, "Redirecting", HTTPD_RESP_USE_STRLEN);
 }
 
+static const web_file_t *web_find(const char *uri, size_t len)
+{
+    for (const web_file_t *f = web_files; f->uri; f++)
+        if (strlen(f->uri) == len && !memcmp(f->uri, uri, len)) return f;
+    return NULL;
+}
+
 static esp_err_t static_get(httpd_req_t *req)
 {
     if (!host_is_portal(req)) return redirect_portal(req);
@@ -244,33 +237,18 @@ static esp_err_t static_get(httpd_req_t *req)
     const char *uri = req->uri;
     const char *q = strchr(uri, '?');
     size_t ul = q ? (size_t)(q - uri) : strlen(uri);
-    char path[160];
-    if (ul > 120 || strstr(uri, "..")) return httpd_resp_send_404(req);
-    if (ul <= 1) snprintf(path, sizeof path, "/www/index.html");
-    else         snprintf(path, sizeof path, "/www%.*s", (int)ul, uri);
-
-    FILE *f = fopen(path, "r");
+    const web_file_t *f = ul <= 1 ? web_find("/index.html", 11) : web_find(uri, ul);
     if (!f) return redirect_portal(req);                /* unknown path -> setup page */
 
-    httpd_resp_set_type(req, mime(path));
+    httpd_resp_set_type(req, f->mime);
     httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
-    char *buf = malloc(1024);
-    if (!buf) { fclose(f); return httpd_resp_send_500(req); }
-    size_t n;
-    while ((n = fread(buf, 1, 1024, f)) > 0)
-        if (httpd_resp_send_chunk(req, buf, n) != ESP_OK) break;
-    httpd_resp_send_chunk(req, NULL, 0);
-    free(buf);
-    fclose(f);
-    return ESP_OK;
+    if (f->gzip) httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+    return httpd_resp_send(req, (const char *)f->data, f->size);
 }
 
 static esp_err_t start_http(void)
 {
-    esp_vfs_spiffs_conf_t sp = { .base_path = "/www", .partition_label = "www",
-                                 .max_files = 6, .format_if_mount_failed = false };
-    esp_err_t e = esp_vfs_spiffs_register(&sp);
-    if (e != ESP_OK) { ESP_LOGE(TAG, "mount www: %s", esp_err_to_name(e)); return e; }
+    if (!web_files_count) ESP_LOGW(TAG, "setup page not embedded (web/dist was missing at build time)");
 
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.server_port      = PROV_HTTP_PORT;
@@ -279,7 +257,7 @@ static esp_err_t start_http(void)
     cfg.lru_purge_enable = true;
     cfg.stack_size       = 6144;
     httpd_handle_t srv;
-    e = httpd_start(&srv, &cfg);
+    esp_err_t e = httpd_start(&srv, &cfg);
     if (e != ESP_OK) return e;
 
     /* First match wins: register the API routes before the wildcard catch-all. */

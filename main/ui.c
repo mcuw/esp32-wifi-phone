@@ -4,6 +4,7 @@
 #include "lvgl.h"
 #include "board.h"
 #include "app_config.h"
+#include "version.h"
 
 /* Built-in Montserrat has no umlauts: all device-UI strings are ASCII. */
 #if LV_FONT_MONTSERRAT_36
@@ -27,15 +28,17 @@
 static ui_handlers_t H;
 static char s_my_name[NAME_MAX_LEN + 1];
 
-static lv_obj_t *scr_contacts, *scr_call, *scr_prov, *scr_set;
+static lv_obj_t *scr_contacts, *scr_call, *scr_prov, *scr_set, *scr_upd;
 static lv_obj_t *c_name, *c_net, *c_list, *c_empty;
 static lv_obj_t *k_name, *k_status, *k_accept, *k_hang;
 static lv_obj_t *p_ssid, *p_pass;
+static lv_obj_t *o_info, *o_btn, *o_btn_lbl, *u_title, *u_ver, *u_pct;
+static ota_state_t s_ota = OTA_IDLE;
 static lv_timer_t *call_timer, *idle_timer;
 static peer_t s_peers[PEER_MAX];
 static int s_npeers;
 static int s_call_secs;
-static bool s_idle, s_in_call, s_prov_mode;
+static bool s_idle, s_in_call, s_prov_mode, s_in_update;
 
 /* ---------- helpers ----------------------------------------------------- */
 static lv_obj_t *screen(void)
@@ -87,6 +90,11 @@ static void on_peer_click(lv_event_t *e)
 static void on_settings(lv_event_t *e) { lv_screen_load(scr_set); }
 static void on_back(lv_event_t *e)     { lv_screen_load(scr_contacts); }
 static void on_wifi(lv_event_t *e)     { if (H.wifi_setup) H.wifi_setup(); }
+static void on_ota(lv_event_t *e)
+{
+    if (s_ota == OTA_AVAILABLE) { if (H.ota_install) H.ota_install(); }
+    else if (s_ota != OTA_CHECKING && s_ota != OTA_INSTALLING && s_ota != OTA_REBOOTING) { if (H.ota_check) H.ota_check(); }
+}
 static void on_vol(lv_event_t *e)      { if (H.volume) H.volume(lv_slider_get_value(lv_event_get_target_obj(e))); }
 
 static void build_contacts(void)
@@ -112,14 +120,20 @@ static void build_contacts(void)
 static void build_settings(void)
 {
     scr_set = screen();
-    /* Touch targets were too close together at the default 12 px. */
-    lv_obj_set_style_pad_row(scr_set, 40, 0);
+    /* Touch targets were too close together at the default 12 px (issue #9). */
+    lv_obj_set_style_pad_row(scr_set, 32, 0);
     label(scr_set, "Einstellungen", FONT_BIG, C_TEXT);
     label(scr_set, "Lautstaerke", LV_FONT_DEFAULT, C_DIM);
     lv_obj_t *sl = lv_slider_create(scr_set);
     lv_obj_set_width(sl, LV_PCT(80));
     lv_slider_set_value(sl, 70, LV_ANIM_OFF);
     lv_obj_add_event_cb(sl, on_vol, LV_EVENT_VALUE_CHANGED, NULL);
+    o_info = label(scr_set, "", LV_FONT_DEFAULT, C_DIM);
+    lv_label_set_text_fmt(o_info, "Firmware %s", ota_version());
+    o_btn = lv_button_create(scr_set);
+    o_btn_lbl = lv_label_create(o_btn);
+    lv_label_set_text(o_btn_lbl, LV_SYMBOL_REFRESH " Nach Update suchen");
+    lv_obj_add_event_cb(o_btn, on_ota, LV_EVENT_CLICKED, NULL);
     lv_obj_t *w = lv_button_create(scr_set);
     lv_obj_t *wl = lv_label_create(w);
     lv_label_set_text(wl, LV_SYMBOL_WIFI " WLAN aendern");
@@ -128,6 +142,17 @@ static void build_settings(void)
     lv_obj_t *bl = lv_label_create(b);
     lv_label_set_text(bl, LV_SYMBOL_LEFT " Zurueck");
     lv_obj_add_event_cb(b, on_back, LV_EVENT_CLICKED, NULL);
+}
+
+/* ---------- update progress screen ----------------------------------------- */
+static void build_update(void)
+{
+    scr_upd = screen();
+    lv_obj_set_flex_align(scr_upd, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    u_title = label(scr_upd, "Update laeuft ...", FONT_BIG, C_TEXT);
+    u_ver   = label(scr_upd, "", FONT_MID, C_DIM);
+    u_pct   = label(scr_upd, "0 %", FONT_BIG, C_TEXT);
+    label(scr_upd, "Keine Anrufe waehrend des Updates. Bitte nicht ausschalten.", LV_FONT_DEFAULT, C_DIM);
 }
 
 /* ---------- call screen --------------------------------------------------- */
@@ -171,7 +196,7 @@ static void build_prov(void)
 /* ---------- idle detection ------------------------------------------------ */
 static void idle_tick(lv_timer_t *t)
 {
-    if (s_in_call || s_prov_mode) return;
+    if (s_in_call || s_prov_mode || s_in_update) return;
     bool idle = lv_display_get_inactive_time(NULL) > IDLE_MS;
     if (idle != s_idle) { s_idle = idle; if (H.idle) H.idle(idle); }
 }
@@ -182,7 +207,7 @@ void ui_init(const ui_handlers_t *h, const char *my_name)
     H = *h;
     strlcpy(s_my_name, my_name, sizeof s_my_name);
     board_lock(0);
-    build_contacts(); build_settings(); build_call(); build_prov();
+    build_contacts(); build_settings(); build_call(); build_prov(); build_update();
     idle_timer = lv_timer_create(idle_tick, 1000, NULL);
     board_unlock();
 }
@@ -259,6 +284,52 @@ void ui_set_call(call_state_t st, const char *peer, const char *note)
             lv_label_set_text(k_status, inc ? "Eingehender Anruf" : (note ? note : "Verbinde"));
         }
         lv_screen_load(scr_call);
+    }
+    board_unlock();
+}
+
+void ui_set_ota(ota_state_t st, const char *version, int percent, const char *msg)
+{
+    const char *v = version_display(version);
+    board_lock(0);
+    s_ota = st;
+    switch (st) {
+    case OTA_CHECKING:
+        lv_label_set_text_fmt(o_info, "Firmware %s - suche Update ...", ota_version());
+        break;
+    case OTA_UP_TO_DATE:
+        lv_label_set_text_fmt(o_info, "Firmware %s - aktuell", ota_version());
+        lv_label_set_text(o_btn_lbl, LV_SYMBOL_REFRESH " Nach Update suchen");
+        break;
+    case OTA_AVAILABLE:
+        if (msg) lv_label_set_text_fmt(o_info, "Firmware %s - %s", ota_version(), msg);
+        else     lv_label_set_text_fmt(o_info, "Firmware %s - Update %s verfuegbar", ota_version(), v);
+        lv_label_set_text_fmt(o_btn_lbl, LV_SYMBOL_DOWNLOAD " Update %s installieren", v);
+        break;
+    case OTA_INSTALLING:
+    case OTA_REBOOTING:
+        if (!s_in_update) {
+            s_in_update = true;
+            lv_label_set_text_fmt(u_ver, "%s -> %s", ota_version(), v);
+            lv_screen_load(scr_upd);
+        }
+        lv_display_trigger_activity(NULL);
+        if (st == OTA_REBOOTING) lv_label_set_text(u_title, "Neustart ...");
+        lv_label_set_text_fmt(u_pct, "%d %%", percent);
+        break;
+    case OTA_FAILED:
+        lv_label_set_text_fmt(o_info, "Firmware %s - %s", ota_version(), msg ? msg : "Fehler");
+        if (version) lv_label_set_text_fmt(o_btn_lbl, LV_SYMBOL_DOWNLOAD " Erneut versuchen (%s)", v);
+        else         lv_label_set_text(o_btn_lbl, LV_SYMBOL_REFRESH " Nach Update suchen");
+        s_ota = version ? OTA_AVAILABLE : OTA_IDLE;     /* ota.c keeps the offer after a failed install */
+        if (s_in_update) {
+            s_in_update = false;
+            lv_display_trigger_activity(NULL);
+            lv_screen_load(scr_set);
+        }
+        break;
+    case OTA_IDLE:
+        break;
     }
     board_unlock();
 }
