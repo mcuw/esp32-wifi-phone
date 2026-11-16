@@ -110,7 +110,17 @@ static esp_err_t audio_create(void)
 esp_err_t board_audio_start(void)
 {
     if (s_audio_on) return ESP_OK;
-    if (!s_spk && audio_create() != ESP_OK) return ESP_FAIL;
+    if (!s_spk) {
+        if (audio_create() != ESP_OK) return ESP_FAIL;
+    } else {
+        /* esp_codec_dev_open() -> set_fmt disables the I2S channels before it
+         * reconfigures them, and expects them enabled. audio_create() leaves
+         * them enabled, but board_audio_stop() closed them, so from the second
+         * call on that disable logged "the channel has not been enabled yet"
+         * twice (TX and RX, issue #8). Re-enable them to restore that state. */
+        i2s_channel_enable(s_tx);
+        i2s_channel_enable(s_rx);
+    }
 
     esp_codec_dev_sample_info_t fs = {
         .sample_rate = AUDIO_RATE, .channel = 2, .bits_per_sample = 16,
