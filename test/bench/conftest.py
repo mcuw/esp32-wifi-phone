@@ -68,8 +68,13 @@ class Bench:
         assert r.get("ok"), f"flash {slot} failed: {r.get('error')}"
 
     def reset(self, slot):
-        """Reboot the board; returns its boot lines."""
-        r = self.post("/api/serial/reset", {"slot": slot})
+        """Reboot the board; returns its boot lines. On ESP32-C6 a reset can drop
+        the board off USB for a moment and the bench closes the request - one retry."""
+        try:
+            r = self.post("/api/serial/reset", {"slot": slot})
+        except (ConnectionError, OSError):
+            time.sleep(5)
+            r = self.post("/api/serial/reset", {"slot": slot})
         out = r.get("output", [])
         return out if isinstance(out, list) else out.splitlines()
 
