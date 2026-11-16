@@ -12,6 +12,12 @@ Checked per call (round):
   * RINGING arrived within RINGING_MAX_MS of dialling
   * after the caller hung up (ring time > IDLE_MS), the callee went back to
     iTWT within SLEEP_AGAIN_MAX_MS
+
+And over the whole run, on both phones:
+  * no error log line ("E (...)") except the known harmless ones in
+    KNOWN_ERRORS - e.g. issue #8, an I2S error on every call from the second
+    one on, which this test did not notice before
+  * no crash and no restart
 """
 import datetime
 import pathlib
@@ -25,6 +31,16 @@ SLEEP_AGAIN_MAX_MS = 25000      # IDLE_MS (20 s) + iTWT setup
 RUN_TIMEOUT_S = 420             # autodial defaults: 45 + 2 x 30 + 50 s, plus boot
 
 LOG = re.compile(r"^[IWE] \((\d+)\) ([\w.-]+): (.*)$")
+ERROR = re.compile(r"^E \(\d+\) ")
+CRASH = re.compile(r"Guru Meditation|abort\(\) was called|assert failed|Backtrace:|Rebooting\.\.\.")
+
+# Error lines that are known to be harmless. Each entry needs a reason; a new
+# error line makes the test fail until someone decides it belongs here.
+KNOWN_ERRORS = [
+    # Right after the key handshake the Wi-Fi driver drops one duplicate frame
+    # (PN=1) - every boot, no effect on the connection (issue #6).
+    re.compile(r"wifi:CCMP replay detected"),
+]
 MAC = re.compile(r"wifi:mode : sta \(([0-9a-f:]{17})\)")
 
 
@@ -36,6 +52,23 @@ def parse(lines):
         if m:
             out.append((int(m.group(1)), m.group(2), m.group(3)))
     return out
+
+
+def log_problems(texts):
+    """Unexpected error lines, crash markers and restarts in one phone's log."""
+    problems, last_ms = [], None
+    for text in texts:
+        if ERROR.match(text) and not any(k.search(text) for k in KNOWN_ERRORS):
+            problems.append(text)
+        elif CRASH.search(text):
+            problems.append(text)
+        m = LOG.match(text)
+        if m:
+            ms = int(m.group(1))
+            if last_ms is not None and ms + 1000 < last_ms:      # uptime went backwards
+                problems.append(f"restart: uptime {last_ms} ms -> {ms} ms at: {text}")
+            last_ms = ms
+    return problems
 
 
 def board_mac(boot_lines):
@@ -84,7 +117,8 @@ def save_logs(log_dir, raw, roles):
         path = log_dir / f"{stamp}-{role}-{slot}.log"
         with open(path, "w") as f:
             for e in raw[slot]:
-                t = datetime.datetime.fromtimestamp(e["ts"]).strftime("%H:%M:%S.%f")[:-3]
+                t = (datetime.datetime.fromtimestamp(e["ts"]).strftime("%H:%M:%S.%f")[:-3]
+                     if e["ts"] else "(reset)     ")         # boot lines from the reset reply
                 f.write(f"{t}  {e['text']}\n")
         paths.append(path)
     print("serial logs:", *paths, sep="\n  ")   # pytest shows this for a failed test
@@ -94,12 +128,17 @@ def save_logs(log_dir, raw, roles):
 def collect(bench, caller, callee, log_dir):
     """Reboot callee, then caller; record both logs until autodial is done.
     The logs are saved in any case - also when the run is aborted."""
-    since = {s: bench.last_ts(s) for s in (caller, callee)}
+    since = {}
     raw = {caller: [], callee: []}
     done_at = None
     try:
-        bench.reset(callee)             # awake for IDLE_MS, so the caller finds it via mDNS
-        bench.reset(caller)
+        # The bench's recorder misses the first ~2 s of a boot (the reset
+        # restarts its proxy); the reset reply has them - keep them, so that
+        # errors during boot are checked too. The recorder is read from the
+        # moment after the reset on, so no line of the previous boot gets in.
+        for s in (callee, caller):      # callee first: awake for IDLE_MS, so the caller finds it via mDNS
+            raw[s] += [{"ts": None, "text": line} for line in bench.reset(s)]
+            since[s] = bench.last_ts(s)
         deadline = time.monotonic() + RUN_TIMEOUT_S
         while time.monotonic() < deadline:
             time.sleep(5)
@@ -114,12 +153,8 @@ def collect(bench, caller, callee, log_dir):
                 break
     finally:
         save_logs(log_dir, raw, {caller: "caller", callee: "callee"})
-    # Only the boot we caused counts: cut at the last bootloader banner.
-    for s in raw:
-        starts = [i for i, e in enumerate(raw[s]) if "app_init: App version" in e["text"]]
-        if starts:
-            raw[s] = raw[s][starts[-1]:]
-    return parse(raw[caller]), parse(raw[callee]), done_at is not None
+    texts = {s: [e["text"] for e in raw[s]] for s in raw}
+    return parse(raw[caller]), parse(raw[callee]), done_at is not None, texts
 
 
 def rounds_of(caller_log):
@@ -138,7 +173,7 @@ def rounds_of(caller_log):
 def test_call_reaches_sleeping_phone(bench, boards, pytestconfig):
     caller, callee, callee_mac = boards
     log_dir = pathlib.Path(pytestconfig.getoption("--log-dir"))
-    caller_log, callee_log, finished = collect(bench, caller, callee, log_dir)
+    caller_log, callee_log, finished, texts = collect(bench, caller, callee, log_dir)
 
     assert any(tag == "autodial" and "peer" in msg for _, tag, msg in caller_log), \
         "caller never found the callee via mDNS (is the caller running the autodial build?)"
@@ -184,3 +219,8 @@ def test_call_reaches_sleeping_phone(bench, boards, pytestconfig):
         f"callee did not return to iTWT after every call (only {len(sleep_checks)} of {len(rounds)})"
     for n, dt in enumerate(sleep_checks, 1):
         assert dt <= SLEEP_AGAIN_MAX_MS, f"call {n}: back in iTWT only {dt} ms after BYE"
+
+    # --- both: error lines, crashes, restarts ----------------------------
+    problems = {role: log_problems(texts[slot]) for role, slot in (("caller", caller), ("callee", callee))}
+    assert not any(problems.values()), "unexpected log lines (see the saved logs):\n" + "\n".join(
+        f"  {role}: {line}" for role, lines in problems.items() for line in lines)
