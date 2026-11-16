@@ -272,7 +272,9 @@ static void do_install(void)
     }
     ESP_LOGI(TAG, "update to %s written, rebooting", s_offer);
     set_state(OTA_REBOOTING, s_offer, 100, NULL);
-    vTaskDelay(pdMS_TO_TICKS(1500));                /* let the display show it */
+    /* Let the display show it, and let the log line leave the USB console: on
+     * the bench, lines printed less than ~2 s before esp_restart() got lost. */
+    vTaskDelay(pdMS_TO_TICKS(2000));
     esp_restart();
 }
 
