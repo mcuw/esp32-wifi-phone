@@ -196,13 +196,24 @@ idf.py erase-flash flash          # bzw. esptool --chip esp32c6 erase-flash
   JSON-Parser mit Anführungszeichen/Backslash, DNS-Antwortbau (A mit EDNS-Zusatzrecord, AAAA → leere
   Antwort, kaputte Pakete werden ignoriert).
 
+**Auf zwei Boards am Testbench geprüft** (Stand November 2026, Wi-Fi-6-Router mit WPA3-SAE und PMF):
+- **WLAN-Anmeldung:** 12 von 12 Neustarts beim ersten Versuch verbunden, IP nach 3,7–4,2 s (#6).
+- **iTWT zur Laufzeit:** Der Router nimmt die Anfrage an (Log `iTWT agreed (… cmd 4 …)`), Intervall
+  ~1,0 s (`123*2^13 us`), Wachphase 32,8 ms, unangekündigt, ohne Trigger.
+- **Anruf auf ein schlafendes Telefon:** RINGING nach 0,2–0,35 s, auch mit leerem ARP-Cache beim
+  Anrufer (#5). Nach dem Gespräch oder einem unbeantworteten Klingeln über 20 s schläft das Telefon
+  nach ~21 s wieder. Automatisch geprüft durch den [Bench-Test](#bench-test-anruf-auf-ein-schlafendes-telefon).
+- **Mehrere Anrufe seit dem Booten:** kein Absturz, keine Fehlermeldung (df093ef, #8). Ein
+  angenommenes Gespräch funktioniert auch beim zweiten Anruf (von Hand geprüft).
+- **Core Dump:** Ein Absturz wird in die Partition `coredump` geschrieben und beim nächsten Boot mit
+  korrekter Prüfsumme gefunden. Fremddaten in der Partition werden einmalig gelöscht (#7).
+
 **Noch gezielt zu prüfen:**
-- **iTWT zur Laufzeit:** Kommt die Vereinbarung mit dem Router zustande (Log `WIFI_EVENT_ITWT_SETUP`),
-  und wie hoch ist der Stromverbrauch im Idle?
+- **Stromverbrauch** im Idle mit iTWT, im Vergleich zu Modem-Sleep (bisher nicht gemessen).
 - **Captive Portal** auf verschiedenen Geräten (Android, iOS, Windows, macOS).
 - **Anrufqualität:** Latenz, Echo/Ducking, Verhalten bei Paketverlust im echten WLAN.
 - **BOOT-Taste** als GPIO 9 (Einstieg in den Einrichtungsmodus beim Start).
-- **Core-Dump-Abruf** über `/api/coredump` mit aktivierter Flash-Encryption.
+- **Core-Dump-Abruf** über `/api/coredump` (ohne und mit Flash-Encryption).
 
 ## Bekannte Grenzen und Entwurfsentscheidungen
 
@@ -210,6 +221,7 @@ idf.py erase-flash flash          # bzw. esptool --chip esp32c6 erase-flash
 - **Portal erscheint nicht?** Android „Privates DNS“ auf *Automatisch* stellen (fest eingestelltes DNS-over-TLS umgeht die Umleitung), mobile Daten aus, ggf. WLAN vergessen und neu verbinden. Die Probe-Antworten sind absichtlich nie „online“, damit das Portal geöffnet bleibt.
 - **Nur 2,4 GHz.** Der ESP32-C6 hat kein 5-GHz-Funkmodul. Das Netz muss 2,4 GHz mit Wi-Fi 6 anbieten.
 - **mDNS-Multicast ist unter iTWT unzuverlässig.** Die Kontaktsuche läuft deshalb nur bei eingeschaltetem Display.
+- **Gastnetz mit Client-Isolation geht nicht.** Isolation blockiert Multicast (Kontaktsuche per mDNS) und direkten Unicast (Signalisierung und Audio). Die Telefone finden sich dann nie („Suche Telefone im WLAN …“). Im Router für das Gastnetz den Zugriff aufs Heimnetz bzw. Intranet erlauben oder ein normales WLAN nehmen. Das ist vor jeder Fehlersuche in der Firmware zu prüfen.
 - **Kein Echo-Canceller.** Die Platine hat zwar einen ES7210 mit Referenzpfad, aber ich habe keine Software-AEC für den C6 verifiziert. `call.c` dämpft das Mikro per einfachem Ducking, wenn die Gegenseite laut ist. Für Freisprechen reicht das nur bedingt; Hörer-Betrieb mit niedriger Lautstärke ist robuster. Die zwei Mikrofone werden nur gemittelt (kein Beamforming).
 - **Keine Verschlüsselung der Gespräche.** Signalisierung und Audio gehen unverschlüsselt per UDP durchs LAN. Für mehr als ein Heimnetz wären SRTP/DTLS nötig. Die Provisioning-Daten laufen über das WPA2-geschützte softAP-Netz (Zufallspasswort pro Boot), nicht über TLS.
 - **Zugangsdaten liegen im NVS im Klartext.** Geplant: NVS-Verschlüsselung im HMAC-Schema (`CONFIG_NVS_ENCRYPTION`, `CONFIG_NVS_SEC_KEY_PROTECT_USING_HMAC`, `CONFIG_NVS_SEC_HMAC_EFUSE_KEY_ID`). Fehlt der eFuse-Schlüssel, erzeugt und brennt die Firmware ihn beim ersten Start (irreversibel). Eine `nvs_keys`-Partition braucht dieses Schema nicht.
