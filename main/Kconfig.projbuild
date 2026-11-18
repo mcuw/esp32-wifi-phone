@@ -1,3 +1,32 @@
+menu "Telefon: Firmware-Update (OTA)"
+
+    config PHONE_OTA_MANIFEST_URL
+        string "URL des Update-Manifests"
+        default "https://github.com/mcuw/esp32-wifi-phone/releases/latest/download/ota.json"
+        help
+            JSON {"version":"v1.2.3","url":"https://.../c6_phone.bin"}, das die
+            CI an jedes Release haengt. Eigene Builds (z. B. eine Pro-Version
+            mit signierten Images) tragen hier ihre eigene Quelle ein.
+
+    config PHONE_OTA_FIRST_CHECK_S
+        int "Erste Pruefung nach dem Verbinden (s)"
+        default 60
+
+    config PHONE_OTA_CHECK_INTERVAL_H
+        int "Pruefintervall (h)"
+        default 24
+
+    config PHONE_OTA_VERIFY_TIMEOUT_S
+        int "Neue Firmware muss sich innerhalb von ... als gueltig melden (s)"
+        default 300
+        help
+            Eine frisch installierte Firmware gilt erst als gueltig, wenn WLAN,
+            mDNS und Signalisierung laufen (oder die Einrichtung gestartet ist).
+            Gelingt das nicht in dieser Zeit, startet das Telefon neu und der
+            Bootloader nimmt wieder die vorherige Firmware.
+
+endmenu
+
 menu "Telefon: Testfunktionen"
 
     config PHONE_TEST_AUTODIAL
@@ -42,5 +71,18 @@ menu "Telefon: Testfunktionen"
             default 2
 
     endif
+
+    config PHONE_TEST_OTA
+        bool "OTA ohne Bestaetigung installieren (nur fuer Bench-Tests)"
+        default n
+        help
+            Ein gefundenes Update wird ohne Tippen am Display installiert, und
+            das Manifest darf ueber http:// kommen (Firmware-Ablage des
+            Testbench). Nur ueber sdkconfig.otatest, siehe test/bench/test_ota.py.
+
+    config PHONE_TEST_OTA_NEVER_VALID
+        bool "Firmware meldet sich nie als gueltig (defektes Image fuer den Rollback-Test)"
+        depends on PHONE_TEST_OTA
+        default n
 
 endmenu

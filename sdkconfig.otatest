@@ -1,0 +1,15 @@
+# Bench-Test für OTA (test/bench/test_ota.py) - nie in die Release-Firmware.
+# Bauen mit test/bench/build_ota.sh. Die Manifest-URL zeigt auf die
+# Firmware-Ablage des Testbench und steht in sdkconfig.otatest.local
+# (nicht im Repo, enthält die Bench-Adresse im WLAN der Telefone):
+#   CONFIG_PHONE_OTA_MANIFEST_URL="http://<bench>:8080/firmware/c6phone-otatest/ota.json"
+CONFIG_PHONE_TEST_OTA=y
+CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP=y
+CONFIG_PHONE_OTA_FIRST_CHECK_S=20
+CONFIG_PHONE_OTA_VERIFY_TIMEOUT_S=60
+# Nur für Image A (zusammen mit sdkconfig.autodial): Der Anruf beginnt ~5 s
+# nach dem Finden des Kontakts und klingelt 30 s. 3 s nach dem Wählen löst er
+# die Update-Prüfung aus (statt der Prüfung 20 s nach dem Verbinden). Die
+# Installation muss abgelehnt werden und folgt erst nach dem Auflegen.
+CONFIG_PHONE_TEST_AUTODIAL_DELAY_S=5
+CONFIG_PHONE_TEST_AUTODIAL_ROUNDS=1

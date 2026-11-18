@@ -42,6 +42,7 @@ static call_cb_t   s_cb;
 static char        s_my_name[NAME_MAX_LEN + 1];
 static SemaphoreHandle_t s_mx;
 static call_state_t s_state = CALL_IDLE;
+static bool        s_blocked;                    /* firmware update running: no calls */
 static struct sockaddr_in s_peer;
 static char        s_peer_name[NAME_MAX_LEN + 1];
 static uint16_t    s_call_id;
@@ -315,7 +316,7 @@ static void sig_task(void *arg)
             bool same = (m.call_id == s_call_id) && from.sin_addr.s_addr == s_peer.sin_addr.s_addr;
             switch (m.type) {
             case SIG_INVITE:
-                if (s_state == CALL_IDLE) {
+                if (s_state == CALL_IDLE && !s_blocked) {
                     s_peer = from; s_peer.sin_port = htons(SIG_PORT);
                     s_call_id = m.call_id;
                     strlcpy(s_peer_name, m.name, sizeof s_peer_name);
@@ -376,7 +377,7 @@ esp_err_t call_dial(const peer_t *p)
 {
     esp_err_t e = ESP_ERR_INVALID_STATE;
     xSemaphoreTake(s_mx, portMAX_DELAY);
-    if (s_state == CALL_IDLE) {
+    if (s_state == CALL_IDLE && !s_blocked) {
         memset(&s_peer, 0, sizeof s_peer);
         s_peer.sin_family = AF_INET;
         s_peer.sin_port = htons(SIG_PORT);
@@ -412,3 +413,14 @@ void call_hangup(void)
 }
 
 call_state_t call_state(void) { return s_state; }
+
+bool call_block(bool on)
+{
+    if (!s_mx) return true;                      /* signalling not up yet: no calls anyway */
+    xSemaphoreTake(s_mx, portMAX_DELAY);
+    bool ok = !on || s_state == CALL_IDLE;
+    if (ok) s_blocked = on;
+    xSemaphoreGive(s_mx);
+    if (ok) ESP_LOGI(TAG, "calls %s", on ? "blocked (update)" : "allowed");
+    return ok;
+}

@@ -17,8 +17,12 @@ CONFIG_ESP_WIFI_ENABLE_WIFI_RX_STATS=y
 # --- Sockets: HTTP (static UI + API), DNS, call signalling, mDNS ---
 CONFIG_LWIP_MAX_SOCKETS=16
 
-# --- SPIFFS: Astro/Qwik build output has long file names ---------------
-CONFIG_SPIFFS_OBJ_NAME_LEN=128
+# --- Firmware-Update (OTA, Issue #16) ---------------------------------
+# Neue Firmware startet als "pending verify" und meldet sich erst als gültig,
+# wenn WLAN und Signalisierung laufen (main/ota.c). Sonst nimmt der Bootloader
+# die vorherige. Steckt im Bootloader: einmal per USB flashen, OTA ändert ihn nicht.
+# Kein Anti-Rollback und kein Secure Boot: beides brennt eFuses (erst bei Auslieferung).
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 
 # --- Core dump: bei Absturz ELF-Abbild in Partition "coredump" schreiben
 CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
@@ -60,6 +64,13 @@ CONFIG_LV_USE_TABLE=n
 CONFIG_LV_USE_TABVIEW=n
 CONFIG_LV_USE_TILEVIEW=n
 CONFIG_LV_USE_WIN=n
+
+# --- Display-Puffer: RAM für TLS (Issue #16) ---------------------------
+# Der BSP legt einen LVGL-Zeichenpuffer von 410 x BUF_HEIGHT Pixeln an und
+# wegen sw_rotate einen zweiten gleich großen. Bei 100 Zeilen sind das 164 KB
+# internes RAM (kein PSRAM), und für TLS zu GitHub blieben ~43 KB frei, zu wenig.
+# 40 Zeilen: 66 KB, die Oberfläche zeichnet in mehr, kleineren Streifen.
+CONFIG_BSP_DISPLAY_LVGL_BUF_HEIGHT=40
 
 # --- Schrift: 14 px ist auf dem 2,06"-AMOLED kaum lesbar ----------------
 # Standard 20 px; ui.c nutzt 28 (FONT_MID) und 36 (FONT_BIG).

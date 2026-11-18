@@ -28,6 +28,12 @@ def pytest_addoption(parser):
     g.addoption("--callee-bin", default="build/c6_phone.bin",
                 help="Normal app image for the callee; also flashed back to the caller "
                      "afterwards ('' = leave both boards as they are)")
+    g.addoption("--ota-dir-a", default="build-ota-a",
+                help="test_ota.py: build dir of image A (v0.0.1, autodial), see build_ota.sh")
+    g.addoption("--ota-dir-b", default="build-ota-b", help="test_ota.py: image B (v0.0.2)")
+    g.addoption("--ota-dir-c", default="build-ota-c", help="test_ota.py: image C (v0.0.3, never valid)")
+    g.addoption("--restore-dir", default="build",
+                help="test_ota.py: build dir flashed back to the DUT afterwards ('' = leave image B)")
     g.addoption("--log-dir", default=str(pathlib.Path(__file__).parent / "logs"),
                 help="Where the serial logs of both boards are saved (every run, pass or fail)")
 
@@ -66,6 +72,38 @@ class Bench:
         r = self._req("POST", "/api/flash", b"".join(parts),
                       {"Content-Type": f"multipart/form-data; boundary={boundary}"}, timeout=300)
         assert r.get("ok"), f"flash {slot} failed: {r.get('error')}"
+
+    def _multipart(self, fields, files):
+        """fields: {name: value}; files: [(part name, filename, bytes)]"""
+        boundary = uuid.uuid4().hex
+        parts = [f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode()
+                 for k, v in fields.items()]
+        for name, filename, data in files:
+            parts.append((f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"; '
+                          f'filename="{filename}"\r\nContent-Type: application/octet-stream\r\n\r\n').encode()
+                         + data + b"\r\n")
+        parts.append(f"--{boundary}--\r\n".encode())
+        return b"".join(parts), {"Content-Type": f"multipart/form-data; boundary={boundary}"}
+
+    def flash_build(self, slot, build_dir):
+        """Flash everything flash_args names: bootloader, partition table,
+        ota_data_initial (boot ota_0 again) and the app."""
+        d = pathlib.Path(build_dir)
+        args = (d / "flash_args").read_text()
+        files = [("flash_args", "flash_args", args.encode())]
+        for line in args.splitlines():
+            if line.startswith("0x"):
+                rel = line.split()[1]
+                files.append((os.path.basename(rel), os.path.basename(rel), (d / rel).read_bytes()))
+        body, hdr = self._multipart({"slot": slot, "chip": "esp32c6", "baud": "921600"}, files)
+        r = self._req("POST", "/api/flash", body, hdr, timeout=300)
+        assert r.get("ok"), f"flash {slot} failed: {r.get('error')}"
+
+    def upload_firmware(self, project, filename, data):
+        """Firmware repository: served at /firmware/<project>/<filename>."""
+        body, hdr = self._multipart({"project": project}, [("file", filename, data)])
+        r = self._req("POST", "/api/firmware/upload", body, hdr, timeout=120)
+        assert r.get("ok"), f"upload {filename} failed: {r}"
 
     def reset(self, slot):
         """Reboot the board; returns its boot lines. On ESP32-C6 a reset can drop

@@ -11,8 +11,10 @@ FLAGS="-std=gnu11 -Wall -Wextra -Werror -O1 -fsanitize=address,undefined -fno-sa
 $CC $FLAGS -I$SRC adpcm_test.c $SRC/adpcm.c       -lm -o "$OUT/adpcm_test"
 $CC $FLAGS -I$SRC json_test.c  $SRC/json_util.c       -o "$OUT/json_test"
 $CC $FLAGS -Istub -I$SRC dns_test.c $SRC/dns_server.c -o "$OUT/dns_test"
+$CC $FLAGS -I$SRC version_test.c $SRC/version.c   -o "$OUT/version_test"
 
 "$OUT/adpcm_test"
 "$OUT/json_test"
 "$OUT/dns_test"
+"$OUT/version_test"
 echo "all host tests passed"
