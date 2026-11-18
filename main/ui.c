@@ -110,10 +110,14 @@ static void build_contacts(void)
     lv_obj_set_flex_grow(c_list, 1);
     c_empty = label(scr_contacts, "Suche Telefone im WLAN ...", LV_FONT_DEFAULT, C_DIM);
 
+    /* As tall as a contact row (the default height was too small to hit), but only as
+       wide as its text: the display's corners are rounded. */
     lv_obj_t *s = lv_button_create(scr_contacts);
+    lv_obj_set_height(s, 72);
     lv_obj_set_style_bg_color(s, C_ROW, 0);
     lv_obj_t *sl = lv_label_create(s);
     lv_label_set_text(sl, LV_SYMBOL_SETTINGS " Einstellungen");
+    lv_obj_center(sl);
     lv_obj_add_event_cb(s, on_settings, LV_EVENT_CLICKED, NULL);
 }
 
