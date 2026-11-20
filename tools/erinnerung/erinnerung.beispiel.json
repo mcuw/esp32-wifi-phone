@@ -1,0 +1,10 @@
+{
+  "ref_audio": "stimme/probe.wav",
+  "ref_text": "",
+  "f5_modell": "F5TTS_v1_Base",
+  "f5_ckpt": "hf://aihpi/F5-TTS-German/PFAD/ZUM/CHECKPOINT.safetensors",
+  "f5_vocab": "hf://aihpi/F5-TTS-German/PFAD/ZUR/vocab.txt",
+  "anrufer_name": "Erinnerung",
+  "wiederholen": 2,
+  "klingeln": 40
+}

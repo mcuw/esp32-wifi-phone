@@ -34,6 +34,13 @@ jobs:
       - name: Web client test
         working-directory: web
         run: npm test
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Reminder tool (ADPCM vs. firmware, call flow against a simulated phone)
+        run: |
+          pip install numpy
+          python -m unittest discover -s tools/erinnerung -v
 
   web:
     name: Web UI (Astro + Qwik)

@@ -76,6 +76,7 @@ und `dependencies.lock` (ESP-IDF-Komponenten) sind eingecheckt. Komponenten aktu
 ```bash
 sh test/host/run.sh                    # C-Tests (ADPCM, JSON, DNS) mit ASan/UBSan, ohne ESP-IDF
 (cd web && npm test)                   # Test des Web-Clients gegen einen Mock-Server (Node >= 22)
+python -m unittest discover -s tools/erinnerung   # Erinnerungsanruf vom PC (braucht numpy)
 ```
 
 GitHub Actions (`.github/workflows/ci.yml`), bei Push auf `main`, Pull Requests und Tags `v*`:
@@ -133,6 +134,12 @@ Zur Fehlersuche lohnt der Blick in diese Logzeilen:
 Die Parameter des Auto-Wählens (Zielname, Wartezeit, Klingeldauer, Pause, Anzahl) lassen sich per
 `menuconfig` unter „Telefon: Testfunktionen“ ändern. Bei `ROUNDS=0` wählt der Anrufer endlos, für
 Langzeittests.
+
+## Erinnerungsanruf vom PC
+
+`tools/erinnerung/` ruft ein Telefon vom PC aus an und spricht eine Nachricht, z. B. einen Termin.
+Die Stimme kommt lokal aus F5-TTS mit einer Stimmprobe. Die Firmware bleibt unverändert. Details:
+[tools/erinnerung/README.md](tools/erinnerung/README.md).
 
 ## Einrichten
 

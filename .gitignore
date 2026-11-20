@@ -18,3 +18,4 @@ web/.astro/
 .DS_Store
 test/bench/logs/
 __pycache__/
+tools/erinnerung/erinnerung.json

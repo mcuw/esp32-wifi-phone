@@ -1,0 +1,4 @@
+# PyTorch mit CUDA vorher passend installieren, siehe README.md
+numpy
+zeroconf
+f5-tts
